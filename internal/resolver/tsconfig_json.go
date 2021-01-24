@@ -125,12 +125,15 @@ func ParseTSConfigJSON(
 					result.BaseURLForPaths = "."
 				}
 				result.Paths = make(map[string][]string)
+				println(fmt.Sprintf("@@paths! %v", result.Paths))
 				for _, prop := range paths.Properties {
 					if key, ok := getString(prop.Key); ok {
 						if !isValidTSConfigPathPattern(key, log, source, prop.Key.Loc) {
+							println(fmt.Sprintf("@@prop! %#v is invalid", key))
 							continue
 						}
 
+						println(fmt.Sprintf("@@prop! %#v is valid!", key))
 						// The "paths" field is an object which maps a pattern to an
 						// array of remapping patterns to try, in priority order. See
 						// the documentation for examples of how this is used:

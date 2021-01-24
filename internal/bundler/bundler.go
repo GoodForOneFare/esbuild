@@ -8,13 +8,14 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"unicode"
 	"unicode/utf8"
-
 	"github.com/evanw/esbuild/internal/ast"
 	"github.com/evanw/esbuild/internal/cache"
 	"github.com/evanw/esbuild/internal/compat"
@@ -149,6 +150,48 @@ type parseResult struct {
 	resolveResults []*resolver.ResolveResult
 }
 
+func replaceStuff(path string, contents string, replaced string) string {
+	var dir = filepath.Dir(path)
+	translationsFile := filepath.Join(dir, "translations", "en.json")
+	var attempts = make([]string, 0)
+	// attempts = append(attempts, translationsFile)
+
+	for _, err := os.Stat(translationsFile); os.IsNotExist(err); {
+		// println(path + " - " + dir + " - " + translationsFile)
+		var oldDir = dir
+		dir = filepath.Dir(dir)
+
+		// if path == "app/components/CardActionsMenu/CardActionsMenu.tsx" {
+		// 	fmt.Fprintf(os.Stderr, "stat: %s %v\n", translationsFile, err)
+		// }
+		attempts = append(attempts, translationsFile)
+
+		if oldDir == dir {
+			// println("No translations found for " + path + "\n   " + strings.Join(attempts, "\n   "))
+			break;
+		}
+		translationsFile = filepath.Join(dir, "translations", "en.json")			
+		_, err = os.Stat(translationsFile)
+	}
+
+	if _, err := os.Stat(translationsFile); err == nil {
+		// println("Translations found for " + path)
+		var newContents = strings.Replace(contents, replaced + "()", replaced + "({id: '" + path + "', fallback: _en})", 1)
+		return "import _en from '" + translationsFile + "';\n" + newContents
+	}				
+
+	return contents;
+}
+
+func translationsHack(path string, contents string) string {
+	if strings.Contains(contents, "useI18n()") {
+		return replaceStuff(path, contents, "useI18n")
+	} else if strings.Contains(contents, "withI18n()") {
+		return replaceStuff(path, contents, "withI18n")
+	}
+	return contents
+}
+
 func parseFile(args parseArgs) {
 	source := logger.Source{
 		Index:          args.sourceIndex,
@@ -214,18 +257,26 @@ func parseFile(args parseArgs) {
 
 	switch loader {
 	case config.LoaderJS:
+		source.Contents = translationsHack(source.PrettyPath, source.Contents)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok
 
 	case config.LoaderJSX:
 		args.options.JSX.Parse = true
+
+		source.Contents = translationsHack(source.PrettyPath, source.Contents)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok
 
 	case config.LoaderTS:
 		args.options.TS.Parse = true
+
+		source.Contents = translationsHack(source.PrettyPath, source.Contents)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok
@@ -233,6 +284,14 @@ func parseFile(args parseArgs) {
 	case config.LoaderTSX:
 		args.options.TS.Parse = true
 		args.options.JSX.Parse = true
+
+		source.Contents = translationsHack(source.PrettyPath, source.Contents)
+
+		// fmt.Fprintf(os.Stderr, "PublicPath: %v\n", args.options.PublicPath)
+		// fmt.Fprintf(os.Stderr, "path: %v\n", source.KeyPath)
+		// fmt.Fprintf(os.Stderr, "prettyPath: %v\n", source.PrettyPath)
+		// fmt.Fprintf(os.Stderr, "Id: %v\n", source.IdentifierName)
+		// fmt.Fprintf(os.Stderr, "source: %v\n\n", source.Contents)		
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok

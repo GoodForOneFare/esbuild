@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	// "encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -595,6 +596,7 @@ func (r *resolver) parseTSConfig(file string, visited map[string]bool) (*TSConfi
 	if visited[file] {
 		return nil, parseErrorImportCycle
 	}
+	println("@@parseTSConfig", file)
 	visited[file] = true
 
 	contents, err := r.caches.FSCache.ReadFile(r.fs, file)
@@ -1161,6 +1163,7 @@ func (r *resolver) loadAsFileOrDirectory(path string, kind ast.ImportKind) (Path
 // official TypeScript compiler
 func (r *resolver) matchTSConfigPaths(tsConfigJSON *TSConfigJSON, path string, kind ast.ImportKind) (PathPair, bool) {
 	// Check for exact matches first
+	// println(path, json.MarshalIndent(tsConfigJSON.Paths, "", "    "))
 	for key, originalPaths := range tsConfigJSON.Paths {
 		if key == path {
 			for _, originalPath := range originalPaths {

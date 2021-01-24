@@ -495,6 +495,8 @@ func (service *serviceType) handleBuildRequest(id uint32, request map[string]int
 						result.Loader = loader
 					}
 
+					// fmt.Fprintf(os.Stderr, "path %s\n", args.Path)
+					// fmt.Fprintf(os.Stderr, "result %s\n\n", *result.Contents)
 					return result, nil
 				})
 			},

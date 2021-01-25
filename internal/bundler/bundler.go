@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -149,6 +150,35 @@ type parseResult struct {
 	resolveResults []*resolver.ResolveResult
 }
 
+func insertTranslationsImport(path string, contents string, replaced string, translationsCache *cache.TranslationsCache) string {
+	var dir = filepath.Dir(path)
+	var aPath = dir
+	for {
+		if translationsCache.HasEnTranslations(aPath) {
+			break
+		}
+
+		if aPath == "." {
+			return contents
+		}
+
+		aPath = filepath.Dir(aPath)
+	}
+
+	var translationsFile = filepath.Join(aPath, "translations", "en.json")
+	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en})", 1)
+	return "import _en from '" + translationsFile + "';\n" + newContents
+}
+
+func translationsHack(path string, contents string, translationsCache *cache.TranslationsCache) string {
+	if strings.Contains(contents, "useI18n()") {
+		return insertTranslationsImport(path, contents, "useI18n", translationsCache)
+	} else if strings.Contains(contents, "withI18n()") {
+		return insertTranslationsImport(path, contents, "withI18n", translationsCache)
+	}
+	return contents
+}
+
 func parseFile(args parseArgs) {
 	source := logger.Source{
 		Index:          args.sourceIndex,
@@ -214,18 +244,26 @@ func parseFile(args parseArgs) {
 
 	switch loader {
 	case config.LoaderJS:
+		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok
 
 	case config.LoaderJSX:
 		args.options.JSX.Parse = true
+
+		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok
 
 	case config.LoaderTS:
 		args.options.TS.Parse = true
+
+		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok
@@ -233,6 +271,9 @@ func parseFile(args parseArgs) {
 	case config.LoaderTSX:
 		args.options.TS.Parse = true
 		args.options.JSX.Parse = true
+
+		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok

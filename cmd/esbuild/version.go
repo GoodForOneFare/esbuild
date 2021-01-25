@@ -1,3 +1,3 @@
 package main
 
-const esbuildVersion = "0.8.34-translations"
+const esbuildVersion = "0.8.34-translations-2"

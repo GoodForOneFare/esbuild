@@ -13,7 +13,9 @@ export interface BuildRequest {
   write: boolean;
   stdinContents: string | null;
   stdinResolveDir: string | null;
+  absWorkingDir: string;
   incremental: boolean;
+  hasOnRebuild: boolean;
   plugins?: BuildPlugin[];
   serve?: ServeRequest;
 }
@@ -45,11 +47,16 @@ export interface BuildResponse {
   warnings: types.Message[];
   outputFiles: BuildOutputFile[];
   rebuildID?: number;
+  watchID?: number;
 }
 
 export interface BuildOutputFile {
   path: string;
   contents: Uint8Array;
+}
+
+export interface PingRequest {
+  command: 'ping';
 }
 
 export interface RebuildRequest {
@@ -62,6 +69,11 @@ export interface RebuildDisposeRequest {
   rebuildID: number;
 }
 
+export interface WatchStopRequest {
+  command: 'watch-stop';
+  watchID: number;
+}
+
 export interface OnRequestRequest {
   command: 'serve-request';
   serveID: number;
@@ -72,6 +84,12 @@ export interface OnWaitRequest {
   command: 'serve-wait';
   serveID: number;
   error: string | null;
+}
+
+export interface OnWatchRebuildRequest {
+  command: 'watch-rebuild';
+  watchID: number;
+  args: types.BuildResult;
 }
 
 export interface TransformRequest {
@@ -100,6 +118,7 @@ export interface OnResolveRequest {
   importer: string;
   namespace: string;
   resolveDir: string;
+  pluginData: number;
 }
 
 export interface OnResolveResponse {
@@ -112,6 +131,7 @@ export interface OnResolveResponse {
   path?: string;
   external?: boolean;
   namespace?: string;
+  pluginData?: number;
 }
 
 export interface OnLoadRequest {
@@ -120,6 +140,7 @@ export interface OnLoadRequest {
   ids: number[];
   path: string;
   namespace: string;
+  pluginData: number;
 }
 
 export interface OnLoadResponse {
@@ -132,6 +153,7 @@ export interface OnLoadResponse {
   contents?: Uint8Array;
   resolveDir?: string;
   loader?: string;
+  pluginData?: number;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

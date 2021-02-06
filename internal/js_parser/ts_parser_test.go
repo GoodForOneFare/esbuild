@@ -1183,6 +1183,10 @@ func TestTSDecorator(t *testing.T) {
 	expectParseErrorTS(t, "class Foo { @dec static *#foo() {} }", "<stdin>: error: Expected identifier but found \"#foo\"\n")
 	expectParseErrorTS(t, "class Foo { @dec static async #foo() {} }", "<stdin>: error: Expected identifier but found \"#foo\"\n")
 	expectParseErrorTS(t, "class Foo { @dec static async* #foo() {} }", "<stdin>: error: Expected identifier but found \"#foo\"\n")
+
+	// Decorators aren't allowed on class constructors
+	expectParseErrorTS(t, "class Foo { @dec constructor() {} }", "<stdin>: error: TypeScript does not allow decorators on class constructors\n")
+	expectParseErrorTS(t, "class Foo { @dec public constructor() {} }", "<stdin>: error: TypeScript does not allow decorators on class constructors\n")
 }
 
 func TestTSTry(t *testing.T) {
@@ -1281,6 +1285,12 @@ func TestTSNew(t *testing.T) {
 	expectPrintedTS(t, "new Foo<number>!(x)", "new Foo() < number > !x;\n")
 	expectParseErrorTS(t, "new Foo<number>!()", "<stdin>: error: Unexpected \")\"\n")
 	expectParseError(t, "new Foo!()", "<stdin>: error: Unexpected \"!\"\n")
+}
+
+func TestTSExponentiation(t *testing.T) {
+	// More info: https://github.com/microsoft/TypeScript/issues/41755
+	expectParseErrorTS(t, "await x! ** 2", "<stdin>: error: Unexpected \"**\"\n")
+	expectPrintedTS(t, "await x as any ** 2", "(await x) ** 2;\n")
 }
 
 func TestTSImport(t *testing.T) {

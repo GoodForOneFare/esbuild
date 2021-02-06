@@ -30,7 +30,7 @@ var defaultMainFields = map[config.Platform][]string{
 	// This is deliberate because the presence of the "browser" field is a
 	// good signal that the "module" field may have non-browser stuff in it,
 	// which will crash or fail to be bundled when targeting the browser.
-	config.PlatformBrowser: []string{"browser", "module", "main"},
+	config.PlatformBrowser: {"browser", "module", "main"},
 
 	// Note that this means if a package specifies "module" and "main", the ES6
 	// module will not be selected. This means tree shaking will not work when
@@ -48,12 +48,12 @@ var defaultMainFields = map[config.Platform][]string{
 	// If you want to enable tree shaking when targeting node, you will have to
 	// configure the main fields to be "module" and then "main". Keep in mind
 	// that some packages may break if you do this.
-	config.PlatformNode: []string{"main", "module"},
+	config.PlatformNode: {"main", "module"},
 
 	// The neutral platform is for people that don't want esbuild to try to
 	// pick good defaults for their platform. In that case, the list of main
 	// fields is empty by default. You must explicitly configure it yourself.
-	config.PlatformNeutral: []string{},
+	config.PlatformNeutral: {},
 }
 
 // Path resolution is a mess. One tricky issue is the "module" override for the
@@ -91,6 +91,9 @@ type IgnoreIfUnusedData struct {
 
 type ResolveResult struct {
 	PathPair PathPair
+
+	// If this was resolved by a plugin, the plugin gets to store its data here
+	PluginData interface{}
 
 	// If not empty, these should override the default values
 	JSXFactory  []string // Default if empty: "React.createElement"
@@ -334,7 +337,7 @@ func (r *resolver) finalizeResolve(result ResolveResult) *ResolveResult {
 				}
 
 				if entry, ok := dirInfo.entries[base]; ok {
-					if symlink := entry.Symlink(); symlink != "" {
+					if symlink := entry.Symlink(r.fs); symlink != "" {
 						// Is this entry itself a symlink?
 						path.Text = symlink
 					} else if dirInfo.absRealPath != "" {
@@ -388,11 +391,29 @@ func (r *resolver) resolveWithoutSymlinks(sourceDir string, importPath string, k
 			return &ResolveResult{PathPair: PathPair{Primary: logger.Path{Text: absPath, Namespace: "file"}}, IsExternal: true}
 		}
 
-		if absolute, ok := r.loadAsFileOrDirectory(absPath, kind); ok {
-			checkPackage = false
-			result = absolute
-		} else if !checkPackage {
-			return nil
+		// Check the non-package "browser" map for the first time (1 out of 2)
+		importDirInfo := r.dirInfoCached(r.fs.Dir(absPath))
+		if importDirInfo != nil && importDirInfo.enclosingBrowserScope != nil {
+			if packageJSON := importDirInfo.enclosingBrowserScope.packageJSON; packageJSON.browserNonPackageMap != nil {
+				if remapped, ok := packageJSON.browserNonPackageMap[absPath]; ok {
+					if remapped == nil {
+						return &ResolveResult{PathPair: PathPair{Primary: logger.Path{Text: absPath, Namespace: BrowserFalseNamespace}}}
+					} else if remappedResult, ok := r.resolveWithoutRemapping(importDirInfo.enclosingBrowserScope, *remapped, kind); ok {
+						result = remappedResult
+						checkRelative = false
+						checkPackage = false
+					}
+				}
+			}
+		}
+
+		if checkRelative {
+			if absolute, ok := r.loadAsFileOrDirectory(absPath, kind); ok {
+				checkPackage = false
+				result = absolute
+			} else if !checkPackage {
+				return nil
+			}
 		}
 	}
 
@@ -460,7 +481,7 @@ func (r *resolver) resolveWithoutSymlinks(sourceDir string, importPath string, k
 		resultDir := r.fs.Dir(path.Text)
 		resultDirInfo := r.dirInfoCached(resultDir)
 
-		// Support remapping one non-module path to another via the "browser" field
+		// Check the non-package "browser" map for the second time (2 out of 2)
 		if resultDirInfo != nil && resultDirInfo.enclosingBrowserScope != nil {
 			packageJSON := resultDirInfo.enclosingBrowserScope.packageJSON
 			if packageJSON.browserNonPackageMap != nil {
@@ -527,6 +548,18 @@ type packageJSON struct {
 	// tell, the official spec is a GitHub repo hosted by a user account:
 	// https://github.com/defunctzombie/package-browser-field-spec. The npm docs
 	// say almost nothing: https://docs.npmjs.com/files/package.json.
+	//
+	// Note that the non-package "browser" map has to be checked twice to match
+	// Webpack's behavior: once before resolution and once after resolution. It
+	// leads to some unintuitive failure cases that we must emulate around missing
+	// file extensions:
+	//
+	// * Given the mapping "./no-ext": "./no-ext-browser.js" the query "./no-ext"
+	//   should match but the query "./no-ext.js" should NOT match.
+	//
+	// * Given the mapping "./ext.js": "./ext-browser.js" the query "./ext.js"
+	//   should match and the query "./ext" should ALSO match.
+	//
 	browserNonPackageMap map[string]*string
 	browserPackageMap    map[string]*string
 
@@ -726,7 +759,7 @@ func (r *resolver) dirInfoUncached(path string) *dirInfo {
 	base := r.fs.Base(path)
 	if base != "node_modules" {
 		if entry, ok := entries["node_modules"]; ok {
-			info.hasNodeModules = entry.Kind() == fs.DirEntry
+			info.hasNodeModules = entry.Kind(r.fs) == fs.DirEntry
 		}
 	}
 
@@ -736,7 +769,7 @@ func (r *resolver) dirInfoUncached(path string) *dirInfo {
 
 		// Make sure "absRealPath" is the real path of the directory (resolving any symlinks)
 		if entry, ok := parentInfo.entries[base]; ok {
-			if symlink := entry.Symlink(); symlink != "" {
+			if symlink := entry.Symlink(r.fs); symlink != "" {
 				info.absRealPath = symlink
 			} else if parentInfo.absRealPath != "" {
 				info.absRealPath = r.fs.Join(parentInfo.absRealPath, base)
@@ -745,7 +778,7 @@ func (r *resolver) dirInfoUncached(path string) *dirInfo {
 	}
 
 	// Record if this directory has a package.json file
-	if entry, ok := entries["package.json"]; ok && entry.Kind() == fs.FileEntry {
+	if entry, ok := entries["package.json"]; ok && entry.Kind(r.fs) == fs.FileEntry {
 		info.packageJSON = r.parsePackageJSON(path)
 
 		// Propagate this browser scope into child directories
@@ -758,9 +791,9 @@ func (r *resolver) dirInfoUncached(path string) *dirInfo {
 	{
 		var tsConfigPath string
 		if forceTsConfig := r.options.TsConfigOverride; forceTsConfig == "" {
-			if entry, ok := entries["tsconfig.json"]; ok && entry.Kind() == fs.FileEntry {
+			if entry, ok := entries["tsconfig.json"]; ok && entry.Kind(r.fs) == fs.FileEntry {
 				tsConfigPath = r.fs.Join(path, "tsconfig.json")
-			} else if entry, ok := entries["jsconfig.json"]; ok && entry.Kind() == fs.FileEntry {
+			} else if entry, ok := entries["jsconfig.json"]; ok && entry.Kind(r.fs) == fs.FileEntry {
 				tsConfigPath = r.fs.Join(path, "jsconfig.json")
 			}
 		} else if parentInfo == nil {
@@ -1007,13 +1040,13 @@ func (r *resolver) loadAsFile(path string, extensionOrder []string) (string, boo
 	base := r.fs.Base(path)
 
 	// Try the plain path without any extensions
-	if entry, ok := entries[base]; ok && entry.Kind() == fs.FileEntry {
+	if entry, ok := entries[base]; ok && entry.Kind(r.fs) == fs.FileEntry {
 		return path, true
 	}
 
 	// Try the path with extensions
 	for _, ext := range extensionOrder {
-		if entry, ok := entries[base+ext]; ok && entry.Kind() == fs.FileEntry {
+		if entry, ok := entries[base+ext]; ok && entry.Kind(r.fs) == fs.FileEntry {
 			return path + ext, true
 		}
 	}
@@ -1038,7 +1071,7 @@ func (r *resolver) loadAsFile(path string, extensionOrder []string) (string, boo
 		// Note that the official compiler code always tries ".ts" before
 		// ".tsx" even if the original extension was ".jsx".
 		for _, ext := range []string{".ts", ".tsx"} {
-			if entry, ok := entries[base[:lastDot]+ext]; ok && entry.Kind() == fs.FileEntry {
+			if entry, ok := entries[base[:lastDot]+ext]; ok && entry.Kind(r.fs) == fs.FileEntry {
 				return path[:len(path)-(len(base)-lastDot)] + ext, true
 			}
 		}
@@ -1054,7 +1087,7 @@ func (r *resolver) loadAsIndex(path string, entries map[string]*fs.Entry) (strin
 	// Try the "index" file with extensions
 	for _, ext := range r.options.ExtensionOrder {
 		base := "index" + ext
-		if entry, ok := entries[base]; ok && entry.Kind() == fs.FileEntry {
+		if entry, ok := entries[base]; ok && entry.Kind(r.fs) == fs.FileEntry {
 			return r.fs.Join(path, base), true
 		}
 	}
@@ -1249,7 +1282,23 @@ func (r *resolver) loadNodeModules(path string, kind ast.ImportKind, dirInfo *di
 		// Skip directories that are themselves called "node_modules", since we
 		// don't ever want to search for "node_modules/node_modules"
 		if dirInfo.hasNodeModules {
-			absolute, ok := r.loadAsFileOrDirectory(r.fs.Join(dirInfo.absPath, "node_modules", path), kind)
+			absPath := r.fs.Join(dirInfo.absPath, "node_modules", path)
+
+			// Check the non-package "browser" map for the first time (1 out of 2)
+			importDirInfo := r.dirInfoCached(r.fs.Dir(absPath))
+			if importDirInfo != nil && importDirInfo.enclosingBrowserScope != nil {
+				if packageJSON := importDirInfo.enclosingBrowserScope.packageJSON; packageJSON.browserNonPackageMap != nil {
+					if remapped, ok := packageJSON.browserNonPackageMap[absPath]; ok {
+						if remapped == nil {
+							return PathPair{Primary: logger.Path{Text: absPath, Namespace: BrowserFalseNamespace}}, true
+						} else if remappedResult, ok := r.resolveWithoutRemapping(importDirInfo.enclosingBrowserScope, *remapped, kind); ok {
+							return remappedResult, true
+						}
+					}
+				}
+			}
+
+			absolute, ok := r.loadAsFileOrDirectory(absPath, kind)
 			if ok {
 				return absolute, true
 			}

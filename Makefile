@@ -3,15 +3,11 @@ ESBUILD_VERSION = $(shell cat version.txt)
 esbuild: cmd/esbuild/version.go cmd/esbuild/*.go pkg/*/*.go internal/*/*.go go.mod
 	go build "-ldflags=-s -w" ./cmd/esbuild
 
-npm/esbuild-wasm/esbuild.wasm: cmd/esbuild/version.go cmd/esbuild/*.go pkg/*/*.go internal/*/*.go
-	cp "$(shell go env GOROOT)/misc/wasm/wasm_exec.js" npm/esbuild-wasm/wasm_exec.js
-	GOOS=js GOARCH=wasm go build -o npm/esbuild-wasm/esbuild.wasm ./cmd/esbuild
-
 test:
 	make -j6 test-common
 
 # These tests are for development
-test-common: test-go vet-go verify-source-map end-to-end-tests js-api-tests plugin-tests register-test
+test-common: test-go vet-go no-filepath verify-source-map end-to-end-tests js-api-tests plugin-tests register-test
 
 # These tests are for release (the extra tests are not included in "test" because they are pretty slow)
 test-all:
@@ -21,7 +17,7 @@ test-all:
 test-prepublish: check-go-version
 
 check-go-version:
-	@go version | grep 'go1\.15\.5' || (echo 'Please install Go version 1.15.5' && false)
+	@go version | grep 'go1\.15\.7' || (echo 'Please install Go version 1.15.7' && false)
 
 test-go:
 	go test ./internal/...
@@ -32,9 +28,13 @@ vet-go:
 fmt-go:
 	go fmt ./cmd/... ./internal/... ./pkg/...
 
-test-wasm-node: platform-wasm
+no-filepath:
+	@! grep --color --include '*.go' -r '"path/filepath"' cmd internal pkg || ( \
+		echo 'error: Use of "path/filepath" is disallowed. See http://golang.org/issue/43768.' && false)
+
+test-wasm-node: esbuild
 	PATH="$(shell go env GOROOT)/misc/wasm:$$PATH" GOOS=js GOARCH=wasm go test ./internal/...
-	npm/esbuild-wasm/bin/esbuild --version
+	node scripts/wasm-tests.js
 
 test-wasm-browser: platform-wasm | scripts/browser/node_modules
 	cd scripts/browser && node browser-tests.js
@@ -66,6 +66,26 @@ lib-typecheck: | lib/node_modules
 
 cmd/esbuild/version.go: version.txt
 	node -e 'console.log(`package main\n\nconst esbuildVersion = "$(ESBUILD_VERSION)"`)' > cmd/esbuild/version.go
+
+wasm-napi-exit0-darwin:
+	node -e 'console.log(`#include <unistd.h>\nvoid* napi_register_module_v1(void* a, void* b) { _exit(0); }`)' \
+		| clang -x c -dynamiclib -mmacosx-version-min=10.5 -o npm/esbuild-wasm/exit0/darwin-x64-LE.node -
+	ls -l npm/esbuild-wasm/exit0/darwin-x64-LE.node
+
+wasm-napi-exit0-linux:
+	node -e 'console.log(`#include <unistd.h>\nvoid* napi_register_module_v1(void* a, void* b) { _exit(0); }`)' \
+		| gcc -x c -shared -o npm/esbuild-wasm/exit0/linux-x64-LE.node -
+	strip npm/esbuild-wasm/exit0/linux-x64-LE.node
+	ls -l npm/esbuild-wasm/exit0/linux-x64-LE.node
+
+wasm-napi-exit0-windows:
+	# This isn't meant to be run directly but is a rough overview of the instructions
+	echo '__declspec(dllexport) void* napi_register_module_v1(void* a, void* b) { ExitProcess(0); }' > main.c
+	echo 'setlocal' > main.bat
+	echo 'call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat" x64' >> main.bat
+	echo 'cl.exe /LD main.c /link /DLL /NODEFAULTLIB /NOENTRY kernel32.lib /OUT:npm/esbuild-wasm/exit0/win32-x64-LE.node' >> main.bat
+	main.bat
+	rm -f main.*
 
 platform-all: cmd/esbuild/version.go test-all
 	make -j8 \
@@ -124,9 +144,8 @@ platform-linux-mips64le:
 platform-linux-ppc64le:
 	make GOOS=linux GOARCH=ppc64le NPMDIR=npm/esbuild-linux-ppc64le platform-unixlike
 
-platform-wasm: esbuild npm/esbuild-wasm/esbuild.wasm | scripts/node_modules
+platform-wasm: esbuild | scripts/node_modules
 	cd npm/esbuild-wasm && npm version "$(ESBUILD_VERSION)" --allow-same-version
-	mkdir -p npm/esbuild-wasm/lib
 	node scripts/esbuild.js ./esbuild --wasm
 
 platform-neutral: esbuild lib-typecheck | scripts/node_modules
@@ -218,6 +237,9 @@ clean:
 	rm -f npm/esbuild-wasm/esbuild.wasm npm/esbuild-wasm/wasm_exec.js
 	rm -rf npm/esbuild/lib
 	rm -rf npm/esbuild-wasm/lib
+	rm -rf require/*/bench/
+	rm -rf require/*/demo/
+	rm -rf require/*/node_modules/
 	go clean -testcache ./internal/...
 
 # This also cleans directories containing cached code from other projects
@@ -229,33 +251,23 @@ clean-all: clean
 # because we want to install the same package name at multiple versions
 
 require/webpack/node_modules:
-	mkdir -p require/webpack
-	echo '{}' > require/webpack/package.json
-	cd require/webpack && npm install webpack@4.44.2 webpack-cli@3.3.12 ts-loader@8.0.4 typescript@4.0.3
+	cd require/webpack && npm ci
 
 require/webpack5/node_modules:
-	mkdir -p require/webpack5
-	echo '{}' > require/webpack5/package.json
-	cd require/webpack5 && npm install webpack@5.14.0 webpack-cli@4.3.1 ts-loader@8.0.14 typescript@4.1.3
+	cd require/webpack5 && npm ci
 
 require/rollup/node_modules:
-	mkdir -p require/rollup
-	echo '{}' > require/rollup/package.json
-	cd require/rollup && npm install rollup@2.29.0 rollup-plugin-terser@7.0.2
+	cd require/rollup && npm ci
 
 require/parcel/node_modules:
-	mkdir -p require/parcel
-	echo '{}' > require/parcel/package.json
-	cd require/parcel && npm install parcel@1.12.4 typescript@4.1.2
+	cd require/parcel && npm ci
 
 	# Fix a bug where parcel doesn't know about one specific node builtin module
 	mkdir -p require/parcel/node_modules/inspector
 	touch require/parcel/node_modules/inspector/index.js
 
 require/parcel2/node_modules:
-	mkdir -p require/parcel2
-	echo '{}' > require/parcel2/package.json
-	cd require/parcel2 && npm install parcel@2.0.0-nightly.532 @parcel/transformer-typescript-tsc@2.0.0-nightly.534 typescript@4.1.2
+	cd require/parcel2 && npm ci
 
 lib/node_modules:
 	cd lib && npm ci
@@ -442,7 +454,7 @@ demo-three-esbuild: esbuild | demo/three
 	du -h demo/three/esbuild/Three.esbuild.js*
 	shasum demo/three/esbuild/Three.esbuild.js*
 
-demo-three-eswasm: npm/esbuild-wasm/esbuild.wasm | demo/three
+demo-three-eswasm: platform-wasm | demo/three
 	rm -fr demo/three/eswasm
 	time -p ./npm/esbuild-wasm/bin/esbuild --bundle --summary --global-name=THREE \
 		--sourcemap --minify demo/three/src/Three.js --outfile=demo/three/eswasm/Three.eswasm.js
@@ -531,7 +543,7 @@ bench-three-esbuild: esbuild | bench/three
 	du -h bench/three/esbuild/entry.esbuild.js*
 	shasum bench/three/esbuild/entry.esbuild.js*
 
-bench-three-eswasm: npm/esbuild-wasm/esbuild.wasm | bench/three
+bench-three-eswasm: platform-wasm | bench/three
 	rm -fr bench/three/eswasm
 	time -p ./npm/esbuild-wasm/bin/esbuild --bundle --summary --global-name=THREE \
 		--sourcemap --minify bench/three/src/entry.js --outfile=bench/three/eswasm/entry.eswasm.js
@@ -786,7 +798,7 @@ bench-readmin-esbuild: esbuild | bench/readmin
 	du -h bench/readmin/esbuild/main.js*
 	shasum bench/readmin/esbuild/main.js*
 
-bench-readmin-eswasm: npm/esbuild-wasm/esbuild.wasm | bench/readmin
+bench-readmin-eswasm: platform-wasm | bench/readmin
 	rm -fr bench/readmin/eswasm
 	time -p ./npm/esbuild-wasm/bin/esbuild $(READMIN_ESBUILD_FLAGS) --outfile=bench/readmin/eswasm/main.js bench/readmin/repo/src/index.js
 	echo "$(READMIN_HTML)" > bench/readmin/eswasm/index.html

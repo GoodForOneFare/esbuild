@@ -1573,7 +1573,7 @@
       expectedStderr: ` > in.js: warning: This assignment will throw because "Foo" is a constant
     5 │             static #foo = Foo = class Bar {}
       ╵                           ~~~
-     in.js: note: "Foo" was declared a constant here
+   in.js: note: "Foo" was declared a constant here
     3 │           class Foo {
       ╵                 ~~~
 
@@ -1598,7 +1598,7 @@
       expectedStderr: ` > in.js: warning: This assignment will throw because "Foo" is a constant
     4 │           static #foo() { Foo = class Bar{} }
       ╵                           ~~~
-     in.js: note: "Foo" was declared a constant here
+   in.js: note: "Foo" was declared a constant here
     2 │         class Foo {
       ╵               ~~~
 
@@ -1858,6 +1858,234 @@
         }
       `,
     }, { async: true }),
+  )
+
+  // Function hoisting tests
+  tests.push(
+    test(['in.js', '--outfile=node.js'], {
+      'in.js': `
+        if (1) {
+          function f() {
+            return f
+          }
+          f = null
+        }
+        if (typeof f !== 'function' || f() !== null) throw 'fail'
+      `,
+    }),
+    test(['in.js', '--outfile=node.js'], {
+      'in.js': `
+        'use strict'
+        if (1) {
+          function f() {
+            return f
+          }
+          f = null
+        }
+        if (typeof f !== 'undefined') throw 'fail'
+      `,
+    }),
+    test(['in.js', '--outfile=node.js'], {
+      'in.js': `
+        export {}
+        if (1) {
+          function f() {
+            return f
+          }
+          f = null
+        }
+        if (typeof f !== 'undefined') throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        if (1) {
+          function f() {
+            return f
+          }
+          f = null
+        }
+        if (typeof f !== 'function' || f() !== null) throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        var f
+        if (1) {
+          function f() {
+            return f
+          }
+          f = null
+        }
+        if (typeof f !== 'function' || f() !== null) throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        'use strict'
+        if (1) {
+          function f() {
+            return f
+          }
+        }
+        if (typeof f !== 'undefined') throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        export {}
+        if (1) {
+          function f() {
+            return f
+          }
+        }
+        if (typeof f !== 'undefined') throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        var f = 1
+        if (1) {
+          function f() {
+            return f
+          }
+          f = null
+        }
+        if (typeof f !== 'function' || f() !== null) throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        'use strict'
+        var f = 1
+        if (1) {
+          function f() {
+            return f
+          }
+        }
+        if (f !== 1) throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        export {}
+        var f = 1
+        if (1) {
+          function f() {
+            return f
+          }
+        }
+        if (f !== 1) throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        import {f, g} from './other'
+        if (f !== void 0 || g !== 'g') throw 'fail'
+      `,
+      'other.js': `
+        'use strict'
+        var f
+        if (1) {
+          function f() {
+            return f
+          }
+        }
+        exports.f = f
+        exports.g = 'g'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        let f = 1
+        // This should not be turned into "if (1) let f" because that's a syntax error
+        if (1)
+          function f() {
+            return f
+          }
+        if (f !== 1) throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js'], {
+      'in.js': `
+        x: function f() { return 1 }
+        if (f() !== 1) throw 'fail'
+      `,
+    }),
+    test(['in.ts', '--outfile=node.js'], {
+      'in.ts': `
+        if (1) {
+          var a = 'a'
+          for (var b = 'b'; 0; ) ;
+          for (var c in { c: 0 }) ;
+          for (var d of ['d']) ;
+          for (var e = 'e' in {}) ;
+          function f() { return 'f' }
+        }
+        const observed = JSON.stringify({ a, b, c, d, e, f: f() })
+        const expected = JSON.stringify({ a: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f' })
+        if (observed !== expected) throw observed
+      `,
+    }),
+    test(['in.ts', '--bundle', '--outfile=node.js'], {
+      'in.ts': `
+        if (1) {
+          var a = 'a'
+          for (var b = 'b'; 0; ) ;
+          for (var c in { c: 0 }) ;
+          for (var d of ['d']) ;
+          for (var e = 'e' in {}) ;
+          function f() { return 'f' }
+        }
+        const observed = JSON.stringify({ a, b, c, d, e, f: f() })
+        const expected = JSON.stringify({ a: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f' })
+        if (observed !== expected) throw observed
+      `,
+    }),
+    test(['in.js', '--outfile=node.js', '--keep-names'], {
+      'in.js': `
+        var f
+        if (1) function f() { return f }
+        if (typeof f !== 'function' || f.name !== 'f') throw 'fail'
+      `,
+    }),
+    test(['in.js', '--bundle', '--outfile=node.js', '--keep-names'], {
+      'in.js': `
+        var f
+        if (1) function f() { return f }
+        if (typeof f !== 'function' || f.name !== 'f') throw 'fail'
+      `,
+    }),
+    test(['in.ts', '--outfile=node.js', '--keep-names'], {
+      'in.ts': `
+        if (1) {
+          var a = 'a'
+          for (var b = 'b'; 0; ) ;
+          for (var c in { c: 0 }) ;
+          for (var d of ['d']) ;
+          for (var e = 'e' in {}) ;
+          function f() {}
+        }
+        const observed = JSON.stringify({ a, b, c, d, e, f: f.name })
+        const expected = JSON.stringify({ a: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f' })
+        if (observed !== expected) throw observed
+      `,
+    }),
+    test(['in.ts', '--bundle', '--outfile=node.js', '--keep-names'], {
+      'in.ts': `
+        if (1) {
+          var a = 'a'
+          for (var b = 'b'; 0; ) ;
+          for (var c in { c: 0 }) ;
+          for (var d of ['d']) ;
+          for (var e = 'e' in {}) ;
+          function f() {}
+        }
+        const observed = JSON.stringify({ a, b, c, d, e, f: f.name })
+        const expected = JSON.stringify({ a: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f' })
+        if (observed !== expected) throw observed
+      `,
+    }),
   )
 
   // Object rest pattern tests

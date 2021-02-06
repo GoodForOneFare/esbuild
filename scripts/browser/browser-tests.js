@@ -63,6 +63,19 @@ async function runAllTests({ esbuild, service }) {
       assertStrictEqual(fib10, 55)
     },
 
+    async buildRelativeIssue693() {
+      const result = await service.build({
+        stdin: {
+          contents: `const x=1`,
+        },
+        write: false,
+        outfile: 'esbuild.js',
+      });
+      assertStrictEqual(result.outputFiles.length, 1)
+      assertStrictEqual(result.outputFiles[0].path, '/esbuild.js')
+      assertStrictEqual(result.outputFiles[0].text, 'const x = 1;\n')
+    },
+
     async serve() {
       expectThrownError(service.serve, 'The "serve" API only works in node')
     },
@@ -96,8 +109,8 @@ async function runAllTests({ esbuild, service }) {
   function assertStrictEqual(a, b) {
     if (a !== b) {
       throw new Error(`Assertion failed:
-  Expected: ${JSON.stringify(a)}
-  Observed: ${JSON.stringify(b)}`);
+  Observed: ${JSON.stringify(a)}
+  Expected: ${JSON.stringify(b)}`);
     }
   }
 
@@ -116,90 +129,66 @@ async function runAllTests({ esbuild, service }) {
   await Promise.all(promises)
 }
 
-let pages = {
-  iife: `
-    <script src="/lib/esbuild.js"></script>
-    <script>
-      testStart = function() {
-        esbuild.startService({ wasmURL: '/esbuild.wasm' }).then(service => {
-          return (${runAllTests})({ esbuild, service })
-        }).then(() => {
-          testDone()
-        }).catch(e => {
-          testFail('' + (e && e.stack || e))
-          testDone()
-        })
+let pages = {};
+
+for (let format of ['iife', 'esm']) {
+  for (let min of [false, true]) {
+    for (let async of [false, true]) {
+      let code = `
+        window.testStart = function() {
+          esbuild.startService({
+            wasmURL: '/esbuild.wasm',
+            worker: ${async},
+          }).then(service => {
+            return (${runAllTests})({ esbuild, service })
+          }).then(() => {
+            testDone()
+          }).catch(e => {
+            testFail('' + (e && e.stack || e))
+            testDone()
+          })
+        }
+      `;
+      let page;
+      if (format === 'esm') {
+        page = `
+          <script type="module">
+            import * as esbuild from '/esm/browser${min ? '.min' : ''}.js'
+            ${code}
+          </script>
+        `;
+      } else {
+        page = `
+          <script src="/lib/browser${min ? '.min' : ''}.js"></script>
+          <script>${code}</script>
+        `;
       }
-    </script>
-  `,
-  iifeMin: `
-    <script src="/lib/esbuild.min.js"></script>
-    <script>
-      testStart = function() {
-        esbuild.startService({ wasmURL: '/esbuild.wasm' }).then(service => {
-          return (${runAllTests})({ esbuild, service })
-        }).then(() => {
-          testDone()
-        }).catch(e => {
-          testFail('' + (e && e.stack || e))
-          testDone()
-        })
-      }
-    </script>
-  `,
-  esm: `
-    <script type="module">
-      import * as esbuild from '/esm/esbuild.js'
-      window.testStart = function() {
-        esbuild.startService({ wasmURL: '/esbuild.wasm' }).then(service => {
-          return (${runAllTests})({ esbuild, service })
-        }).then(() => {
-          testDone()
-        }).catch(e => {
-          testFail('' + (e && e.stack || e))
-          testDone()
-        })
-      }
-    </script>
-  `,
-  esmMin: `
-    <script type="module">
-      import * as esbuild from '/esm/esbuild.min.js'
-      window.testStart = function() {
-        esbuild.startService({ wasmURL: '/esbuild.wasm' }).then(service => {
-          return (${runAllTests})({ esbuild, service })
-        }).then(() => {
-          testDone()
-        }).catch(e => {
-          testFail('' + (e && e.stack || e))
-          testDone()
-        })
-      }
-    </script>
-  `,
+      pages[format + (min ? 'Min' : '') + (async ? 'Async' : '')] = page;
+    }
+  }
 }
 
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url) {
-    if (req.url === '/lib/esbuild.js') {
+    if (req.url === '/lib/browser.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' })
       res.end(js)
       return
     }
 
-    if (req.url === '/lib/esbuild.min.js') {
+    if (req.url === '/lib/browser.min.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' })
       res.end(jsMin)
       return
     }
 
-    if (req.url === '/esm/esbuild.js') {
+    if (req.url === '/esm/browser.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' })
       res.end(esm)
       return
     }
 
-    if (req.url === '/esm/esbuild.min.js') {
+    if (req.url === '/esm/browser.min.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' })
       res.end(esmMin)
       return
@@ -262,10 +251,9 @@ async function main() {
   }
 
   for (let key in pages) {
-    promises.push(runPage(key))
+    await runPage(key)
   }
 
-  await Promise.all(promises)
   await browser.close()
   server.close()
 

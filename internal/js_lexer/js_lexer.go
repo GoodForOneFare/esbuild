@@ -226,6 +226,7 @@ type Lexer struct {
 	HasNewlineBefore                bool
 	HasPureCommentBefore            bool
 	PreserveAllCommentsBefore       bool
+	IsLegacyOctalLiteral            bool
 	CommentsToPreserveBefore        []js_ast.Comment
 	AllOriginalComments             []js_ast.Comment
 	codePoint                       rune
@@ -238,6 +239,7 @@ type Lexer struct {
 	rescanCloseBraceAsTemplateToken bool
 	forGlobalName                   bool
 	json                            json
+	prevErrorLoc                    logger.Loc
 
 	// The log is disabled during speculative scans that may backtrack
 	IsLogDisabled bool
@@ -247,8 +249,9 @@ type LexerPanic struct{}
 
 func NewLexer(log logger.Log, source logger.Source) Lexer {
 	lexer := Lexer{
-		log:    log,
-		source: source,
+		log:          log,
+		source:       source,
+		prevErrorLoc: logger.Loc{Start: -1},
 	}
 	lexer.step()
 	lexer.Next()
@@ -259,6 +262,7 @@ func NewLexerGlobalName(log logger.Log, source logger.Source) Lexer {
 	lexer := Lexer{
 		log:           log,
 		source:        source,
+		prevErrorLoc:  logger.Loc{Start: -1},
 		forGlobalName: true,
 	}
 	lexer.step()
@@ -268,8 +272,9 @@ func NewLexerGlobalName(log logger.Log, source logger.Source) Lexer {
 
 func NewLexerJSON(log logger.Log, source logger.Source, allowComments bool) Lexer {
 	lexer := Lexer{
-		log:    log,
-		source: source,
+		log:          log,
+		source:       source,
+		prevErrorLoc: logger.Loc{Start: -1},
 		json: json{
 			parse:         true,
 			allowComments: allowComments,
@@ -917,6 +922,24 @@ func (lexer *Lexer) NextInsideJSXElement() {
 				for IsIdentifierContinue(lexer.codePoint) || lexer.codePoint == '-' {
 					lexer.step()
 				}
+
+				// Parse JSX namespaces. These are not supported by React or TypeScript
+				// but someone using JSX syntax in more obscure ways may find a use for
+				// them. A namespaced name is just always turned into a string so you
+				// can't use this feature to reference JavaScript identifiers.
+				if lexer.codePoint == ':' {
+					lexer.step()
+					if IsIdentifierStart(lexer.codePoint) {
+						lexer.step()
+						for IsIdentifierContinue(lexer.codePoint) || lexer.codePoint == '-' {
+							lexer.step()
+						}
+					} else {
+						lexer.addError(logger.Loc{Start: lexer.Range().End()},
+							fmt.Sprintf("Expected identifier after %q in namespaced JSX name", lexer.Raw()))
+					}
+				}
+
 				lexer.Identifier = lexer.Raw()
 				lexer.Token = TIdentifier
 				break
@@ -1644,8 +1667,8 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 	underscoreCount := 0
 	lastUnderscoreEnd := 0
 	hasDotOrExponent := first == '.'
-	isLegacyOctalLiteral := false
 	base := 0.0
+	lexer.IsLegacyOctalLiteral = false
 
 	// Assume this is a number, but potentially change to a bigint later
 	lexer.Token = TNumericLiteral
@@ -1664,7 +1687,7 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 
 		case '0', '1', '2', '3', '4', '5', '6', '7', '_':
 			base = 8
-			isLegacyOctalLiteral = true
+			lexer.IsLegacyOctalLiteral = true
 		}
 	}
 
@@ -1673,7 +1696,7 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 		isFirst := true
 		isInvalidLegacyOctalLiteral := false
 		lexer.Number = 0
-		if !isLegacyOctalLiteral {
+		if !lexer.IsLegacyOctalLiteral {
 			lexer.step()
 		}
 
@@ -1687,7 +1710,7 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 				}
 
 				// The first digit must exist
-				if isFirst || isLegacyOctalLiteral {
+				if isFirst || lexer.IsLegacyOctalLiteral {
 					lexer.SyntaxError()
 				}
 
@@ -1704,7 +1727,7 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 				lexer.Number = lexer.Number*base + float64(lexer.codePoint-'0')
 
 			case '8', '9':
-				if isLegacyOctalLiteral {
+				if lexer.IsLegacyOctalLiteral {
 					isInvalidLegacyOctalLiteral = true
 				} else if base < 10 {
 					lexer.SyntaxError()
@@ -1743,7 +1766,7 @@ func (lexer *Lexer) parseNumericLiteralOrDot() {
 			text := lexer.Raw()
 
 			// Can't use a leading zero for bigint literals
-			if isBigIntegerLiteral && isLegacyOctalLiteral {
+			if isBigIntegerLiteral && lexer.IsLegacyOctalLiteral {
 				lexer.SyntaxError()
 			}
 
@@ -2330,18 +2353,36 @@ func (lexer *Lexer) step() {
 }
 
 func (lexer *Lexer) addError(loc logger.Loc, text string) {
+	// Don't report multiple errors in the same spot
+	if loc == lexer.prevErrorLoc {
+		return
+	}
+	lexer.prevErrorLoc = loc
+
 	if !lexer.IsLogDisabled {
 		lexer.log.AddError(&lexer.source, loc, text)
 	}
 }
 
 func (lexer *Lexer) addErrorWithNotes(loc logger.Loc, text string, notes []logger.MsgData) {
+	// Don't report multiple errors in the same spot
+	if loc == lexer.prevErrorLoc {
+		return
+	}
+	lexer.prevErrorLoc = loc
+
 	if !lexer.IsLogDisabled {
 		lexer.log.AddErrorWithNotes(&lexer.source, loc, text, notes)
 	}
 }
 
 func (lexer *Lexer) addRangeError(r logger.Range, text string) {
+	// Don't report multiple errors in the same spot
+	if r.Loc == lexer.prevErrorLoc {
+		return
+	}
+	lexer.prevErrorLoc = r.Loc
+
 	if !lexer.IsLogDisabled {
 		lexer.log.AddRangeError(&lexer.source, r, text)
 	}

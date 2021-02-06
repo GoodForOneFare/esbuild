@@ -1939,7 +1939,7 @@ func (p *printer) printExpr(expr js_ast.Expr, level js_ast.L, flags int) {
 		p.printSpaceBeforeIdentifier()
 		p.print("await")
 		p.printSpace()
-		p.printExpr(e.Value, js_ast.LPrefix, 0)
+		p.printExpr(e.Value, js_ast.LPrefix-1, 0)
 
 		if wrap {
 			p.print(")")
@@ -2037,6 +2037,8 @@ func (p *printer) printExpr(expr js_ast.Expr, level js_ast.L, flags int) {
 		case js_ast.BinOpPow:
 			// "**" can't contain certain unary expressions
 			if left, ok := e.Left.Data.(*js_ast.EUnary); ok && left.Op.UnaryAssignTarget() == js_ast.AssignTargetNone {
+				leftLevel = js_ast.LCall
+			} else if _, ok := e.Left.Data.(*js_ast.EAwait); ok {
 				leftLevel = js_ast.LCall
 			} else if _, ok := e.Left.Data.(*js_ast.EUndefined); ok {
 				// Undefined is printed as "void 0"
@@ -3073,6 +3075,13 @@ func Print(tree js_ast.AST, symbols js_ast.SymbolMap, r renamer.Renamer, options
 		// lines gives very strange and unhelpful results with source maps from
 		// other tools.
 		coverLinesWithoutMappings: options.InputSourceMap == nil,
+	}
+
+	// Add the top-level directive if present
+	if tree.Directive != "" {
+		p.printQuotedUTF8(tree.Directive, options.ASCIIOnly)
+		p.print(";")
+		p.printNewline()
 	}
 
 	for _, part := range tree.Parts {

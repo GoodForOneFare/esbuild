@@ -200,6 +200,7 @@ type fileMeta struct {
 
 type importToBind struct {
 	sourceIndex uint32
+	nameLoc     logger.Loc // Optional, goes with sourceIndex, ignore if zero
 	ref         js_ast.Ref
 }
 
@@ -232,10 +233,7 @@ type exportData struct {
 	// This is the file that the named export above came from. This will be
 	// different from the file that contains this object if this is a re-export.
 	sourceIndex uint32
-
-	// Exports from export stars are shadowed by other exports. This flag helps
-	// implement this behavior.
-	isFromExportStar bool
+	nameLoc     logger.Loc // Optional, goes with sourceIndex, ignore if zero
 }
 
 // This contains linker-specific metadata corresponding to a "js_ast.Part" struct
@@ -396,6 +394,7 @@ func newLinkerContext(
 				resolvedExports[alias] = exportData{
 					ref:         name.Ref,
 					sourceIndex: sourceIndex,
+					nameLoc:     name.AliasLoc,
 				}
 			}
 
@@ -532,6 +531,11 @@ func findReachableFiles(files []file, entryPoints []uint32) []uint32 {
 
 func (c *linkerContext) addRangeError(source logger.Source, r logger.Range, text string) {
 	c.log.AddRangeError(&source, r, text)
+	c.hasErrors = true
+}
+
+func (c *linkerContext) addRangeErrorWithNotes(source logger.Source, r logger.Range, text string, notes []logger.MsgData) {
+	c.log.AddRangeErrorWithNotes(&source, r, text, notes)
 	c.hasErrors = true
 }
 
@@ -1140,6 +1144,7 @@ func (c *linkerContext) scanImportsAndExports() {
 	// Step 3: Resolve "export * from" statements. This must be done after we
 	// discover all modules that can be CommonJS because export stars are ignored
 	// for CommonJS modules.
+	exportStarStack := make([]uint32, 0, 32)
 	for _, sourceIndex := range c.reachableFiles {
 		file := &c.files[sourceIndex]
 		repr, ok := file.repr.(*reprJS)
@@ -1180,8 +1185,7 @@ func (c *linkerContext) scanImportsAndExports() {
 
 		// Propagate exports for export star statements
 		if len(repr.ast.ExportStarImportRecords) > 0 {
-			visited := make(map[uint32]bool)
-			c.addExportsForExportStar(repr.meta.resolvedExports, sourceIndex, visited)
+			c.addExportsForExportStar(repr.meta.resolvedExports, sourceIndex, exportStarStack)
 		}
 
 		// Add an empty part for the namespace export that we can fill in later
@@ -1773,7 +1777,7 @@ func (c *linkerContext) matchImportsWithExportsForFile(sourceIndex uint32) {
 		c.cycleDetector = c.cycleDetector[:0]
 
 		importRef := js_ast.Ref{OuterIndex: sourceIndex, InnerIndex: uint32(innerIndex)}
-		result := c.matchImportWithExport(importTracker{sourceIndex, importRef})
+		result := c.matchImportWithExport(importTracker{sourceIndex: sourceIndex, importRef: importRef})
 		switch result.kind {
 		case matchImportNormal:
 			repr.meta.importsToBind[importRef] = importToBind{
@@ -1808,8 +1812,35 @@ func (c *linkerContext) matchImportsWithExportsForFile(sourceIndex uint32) {
 
 		case matchImportAmbiguous:
 			namedImport := repr.ast.NamedImports[importRef]
-			c.addRangeError(file.source, js_lexer.RangeOfIdentifier(file.source, namedImport.AliasLoc),
-				fmt.Sprintf("Ambiguous import %q has multiple matching exports", namedImport.Alias))
+			r := js_lexer.RangeOfIdentifier(file.source, namedImport.AliasLoc)
+			var notes []logger.MsgData
+
+			// Provide the locations of both ambiguous exports if possible
+			if result.nameLoc.Start != 0 && result.otherNameLoc.Start != 0 {
+				a := c.files[result.sourceIndex].source
+				b := c.files[result.otherSourceIndex].source
+				notes = []logger.MsgData{
+					logger.RangeData(&a, js_lexer.RangeOfIdentifier(a, result.nameLoc), "One matching export is here"),
+					logger.RangeData(&b, js_lexer.RangeOfIdentifier(b, result.otherNameLoc), "Another matching export is here"),
+				}
+			}
+
+			symbol := c.symbols.Get(importRef)
+			if symbol.ImportItemStatus == js_ast.ImportItemGenerated {
+				// This is a warning instead of an error because although it appears
+				// to be a named import, it's actually an automatically-generated
+				// named import that was originally a property access on an import
+				// star namespace object. Normally this property access would just
+				// resolve to undefined at run-time instead of failing at binding-
+				// time, so we emit a warning and rewrite the value to the literal
+				// "undefined" instead of emitting an error.
+				symbol.ImportItemStatus = js_ast.ImportItemMissing
+				msg := fmt.Sprintf("Import %q will always be undefined because there are multiple matching exports", namedImport.Alias)
+				c.log.AddRangeWarningWithNotes(&file.source, r, msg, notes)
+			} else {
+				msg := fmt.Sprintf("Ambiguous import %q has multiple matching exports", namedImport.Alias)
+				c.addRangeErrorWithNotes(file.source, r, msg, notes)
+			}
 		}
 	}
 }
@@ -1840,11 +1871,14 @@ const (
 )
 
 type matchImportResult struct {
-	kind         matchImportKind
-	namespaceRef js_ast.Ref
-	alias        string
-	sourceIndex  uint32
-	ref          js_ast.Ref
+	kind             matchImportKind
+	namespaceRef     js_ast.Ref
+	alias            string
+	sourceIndex      uint32
+	nameLoc          logger.Loc // Optional, goes with sourceIndex, ignore if zero
+	otherSourceIndex uint32
+	otherNameLoc     logger.Loc // Optional, goes with otherSourceIndex, ignore if zero
+	ref              js_ast.Ref
 }
 
 func (c *linkerContext) matchImportWithExport(tracker importTracker) (result matchImportResult) {
@@ -1927,7 +1961,7 @@ loop:
 				// time, so we emit a warning and rewrite the value to the literal
 				// "undefined" instead of emitting an error.
 				symbol.ImportItemStatus = js_ast.ImportItemMissing
-				c.log.AddRangeWarning(&source, r, fmt.Sprintf("No matching export for import %q", namedImport.Alias))
+				c.log.AddRangeWarning(&source, r, fmt.Sprintf("Import %q will always be undefined because there is no matching export", namedImport.Alias))
 			} else {
 				c.addRangeError(source, r, fmt.Sprintf("No matching export for import %q", namedImport.Alias))
 			}
@@ -1952,6 +1986,7 @@ loop:
 						kind:        matchImportNormal,
 						sourceIndex: ambiguousTracker.sourceIndex,
 						ref:         ambiguousTracker.ref,
+						nameLoc:     ambiguousTracker.nameLoc,
 					})
 				}
 			}
@@ -1965,6 +2000,7 @@ loop:
 				kind:        matchImportNormal,
 				sourceIndex: nextTracker.sourceIndex,
 				ref:         nextTracker.importRef,
+				nameLoc:     nextTracker.nameLoc,
 			}
 
 			// If this is a re-export of another import, continue for another
@@ -1985,6 +2021,16 @@ loop:
 	// If there is a potential ambiguity, all results must be the same
 	for _, ambiguousResult := range ambiguousResults {
 		if ambiguousResult != result {
+			if result.kind == matchImportNormal && ambiguousResult.kind == matchImportNormal &&
+				result.nameLoc.Start != 0 && ambiguousResult.nameLoc.Start != 0 {
+				return matchImportResult{
+					kind:             matchImportAmbiguous,
+					sourceIndex:      result.sourceIndex,
+					nameLoc:          result.nameLoc,
+					otherSourceIndex: ambiguousResult.sourceIndex,
+					otherNameLoc:     ambiguousResult.nameLoc,
+				}
+			}
 			return matchImportResult{kind: matchImportAmbiguous}
 		}
 	}
@@ -2025,13 +2071,15 @@ func (c *linkerContext) isCommonJSDueToExportStar(sourceIndex uint32, visited ma
 func (c *linkerContext) addExportsForExportStar(
 	resolvedExports map[string]exportData,
 	sourceIndex uint32,
-	visited map[uint32]bool,
+	sourceIndexStack []uint32,
 ) {
 	// Avoid infinite loops due to cycles in the export star graph
-	if visited[sourceIndex] {
-		return
+	for _, prevSourceIndex := range sourceIndexStack {
+		if prevSourceIndex == sourceIndex {
+			return
+		}
 	}
-	visited[sourceIndex] = true
+	sourceIndexStack = append(sourceIndexStack, sourceIndex)
 	repr := c.files[sourceIndex].repr.(*reprJS)
 
 	for _, importRecordIndex := range repr.ast.ExportStarImportRecords {
@@ -2056,25 +2104,27 @@ func (c *linkerContext) addExportsForExportStar(
 		}
 
 		// Accumulate this file's exports
+	nextExport:
 		for alias, name := range otherRepr.ast.NamedExports {
 			// ES6 export star statements ignore exports named "default"
 			if alias == "default" {
 				continue
 			}
 
-			existing, ok := resolvedExports[alias]
-
-			// Don't overwrite real exports, which shadow export stars
-			if ok && !existing.isFromExportStar {
-				continue
+			// This export star is shadowed if any file in the stack has a matching real named export
+			for _, prevSourceIndex := range sourceIndexStack {
+				prevRepr := c.files[prevSourceIndex].repr.(*reprJS)
+				if _, ok := prevRepr.ast.NamedExports[alias]; ok {
+					continue nextExport
+				}
 			}
 
-			if !ok {
+			if existing, ok := resolvedExports[alias]; !ok {
 				// Initialize the re-export
 				resolvedExports[alias] = exportData{
-					ref:              name.Ref,
-					sourceIndex:      otherSourceIndex,
-					isFromExportStar: true,
+					ref:         name.Ref,
+					sourceIndex: otherSourceIndex,
+					nameLoc:     name.AliasLoc,
 				}
 
 				// Make sure the symbol is marked as imported so that code splitting
@@ -2089,18 +2139,20 @@ func (c *linkerContext) addExportsForExportStar(
 					append(existing.potentiallyAmbiguousExportStarRefs, importToBind{
 						sourceIndex: otherSourceIndex,
 						ref:         name.Ref,
+						nameLoc:     name.AliasLoc,
 					})
 				resolvedExports[alias] = existing
 			}
 		}
 
 		// Search further through this file's export stars
-		c.addExportsForExportStar(resolvedExports, otherSourceIndex, visited)
+		c.addExportsForExportStar(resolvedExports, otherSourceIndex, sourceIndexStack)
 	}
 }
 
 type importTracker struct {
 	sourceIndex uint32
+	nameLoc     logger.Loc // Optional, goes with sourceIndex, ignore if zero
 	importRef   js_ast.Ref
 }
 
@@ -2162,7 +2214,11 @@ func (c *linkerContext) advanceImportTracker(tracker importTracker) (importTrack
 	// Match this import up with an export from the imported file
 	if matchingExport, ok := otherRepr.meta.resolvedExports[namedImport.Alias]; ok {
 		// Check to see if this is a re-export of another import
-		return importTracker{matchingExport.sourceIndex, matchingExport.ref}, importFound, matchingExport.potentiallyAmbiguousExportStarRefs
+		return importTracker{
+			sourceIndex: matchingExport.sourceIndex,
+			importRef:   matchingExport.ref,
+			nameLoc:     matchingExport.nameLoc,
+		}, importFound, matchingExport.potentiallyAmbiguousExportStarRefs
 	}
 
 	// Missing re-exports in TypeScript files are indistinguishable from types
@@ -3316,6 +3372,7 @@ func (c *linkerContext) generateCodeForFileInChunkJS(
 		},
 	}
 	tree := repr.ast
+	tree.Directive = "" // This is handled elsewhere
 	tree.Parts = []js_ast.Part{{Stmts: stmts}}
 	*result = compileResultJS{
 		PrintResult: js_printer.Print(tree, c.symbols, r, printOptions),
@@ -3855,7 +3912,7 @@ func (repr *chunkReprJS) generate(c *linkerContext, chunk *chunkInfo) func(gener
 				var jsonMetadataChunk []byte
 				if c.options.AbsMetadataFile != "" {
 					jsonMetadataChunk = []byte(fmt.Sprintf(
-						"{\n      \"imports\": [],\n      \"inputs\": {},\n      \"bytes\": %d\n    }", len(sourceMap)))
+						"{\n      \"imports\": [],\n      \"exports\": [],\n      \"inputs\": {},\n      \"bytes\": %d\n    }", len(sourceMap)))
 				}
 
 				// Figure out the base name for the source map which may include the content hash

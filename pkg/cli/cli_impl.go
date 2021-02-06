@@ -5,13 +5,13 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/evanw/esbuild/internal/cli_helpers"
+	"github.com/evanw/esbuild/internal/fs"
 	"github.com/evanw/esbuild/internal/logger"
 	"github.com/evanw/esbuild/pkg/api"
 )
@@ -40,6 +40,9 @@ func parseOptionsImpl(osArgs []string, buildOpts *api.BuildOptions, transformOpt
 
 		case arg == "--splitting" && buildOpts != nil:
 			buildOpts.Splitting = true
+
+		case arg == "--watch" && buildOpts != nil:
+			buildOpts.Watch = &api.WatchMode{}
 
 		case arg == "--minify":
 			if buildOpts != nil {
@@ -559,6 +562,19 @@ func runImpl(osArgs []string) int {
 
 	switch {
 	case buildOptions != nil:
+		// These characters were chosen because they work in Windows Command Prompt
+		if buildOptions.Watch != nil {
+			buildOptions.Watch.SpinnerBusy = "··· "
+			buildOptions.Watch.SpinnerIdle = []string{
+				"▫▫▫ ",
+				"▪▫▫ ",
+				"▪▪▫ ",
+				"▪▪▪ ",
+				"▫▪▪ ",
+				"▫▫▪ ",
+			}
+		}
+
 		// Read from stdin when there are no entry points
 		if len(buildOptions.EntryPoints) == 0 {
 			if buildOptions.Stdin == nil {
@@ -587,6 +603,11 @@ func runImpl(osArgs []string) int {
 		result := api.Build(*buildOptions)
 		if len(result.Errors) > 0 {
 			return 1
+		}
+
+		// Do not exit if we're in watch mode
+		if buildOptions.Watch != nil {
+			<-make(chan bool)
 		}
 
 		// Print a summary to stderr
@@ -629,31 +650,33 @@ func printSummary(osArgs []string, outputFiles []api.OutputFile, start time.Time
 	var table logger.SummaryTable = make([]logger.SummaryTableEntry, len(outputFiles))
 
 	if len(outputFiles) > 0 {
-		cwd, _ := os.Getwd()
-
-		for i, file := range outputFiles {
-			path, err := filepath.Rel(cwd, file.Path)
-			if err != nil {
-				path = file.Path
-			}
-			dir, base := filepath.Split(path)
-			n := len(file.Contents)
-			var size string
-			if n < 1024 {
-				size = fmt.Sprintf("%db ", n)
-			} else if n < 1024*1024 {
-				size = fmt.Sprintf("%.1fkb", float64(n)/(1024))
-			} else if n < 1024*1024*1024 {
-				size = fmt.Sprintf("%.1fmb", float64(n)/(1024*1024))
-			} else {
-				size = fmt.Sprintf("%.1fgb", float64(n)/(1024*1024*1024))
-			}
-			table[i] = logger.SummaryTableEntry{
-				Dir:         dir,
-				Base:        base,
-				Size:        size,
-				Bytes:       n,
-				IsSourceMap: strings.HasSuffix(base, ".map"),
+		if cwd, err := os.Getwd(); err == nil {
+			if realFS, err := fs.RealFS(fs.RealFSOptions{AbsWorkingDir: cwd}); err == nil {
+				for i, file := range outputFiles {
+					path, ok := realFS.Rel(realFS.Cwd(), file.Path)
+					if !ok {
+						path = file.Path
+					}
+					base := realFS.Base(path)
+					n := len(file.Contents)
+					var size string
+					if n < 1024 {
+						size = fmt.Sprintf("%db ", n)
+					} else if n < 1024*1024 {
+						size = fmt.Sprintf("%.1fkb", float64(n)/(1024))
+					} else if n < 1024*1024*1024 {
+						size = fmt.Sprintf("%.1fmb", float64(n)/(1024*1024))
+					} else {
+						size = fmt.Sprintf("%.1fgb", float64(n)/(1024*1024*1024))
+					}
+					table[i] = logger.SummaryTableEntry{
+						Dir:         path[:len(path)-len(base)],
+						Base:        base,
+						Size:        size,
+						Bytes:       n,
+						IsSourceMap: strings.HasSuffix(base, ".map"),
+					}
+				}
 			}
 		}
 	}

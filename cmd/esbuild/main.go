@@ -51,6 +51,7 @@ var helpText = func(colors logger.Colors) string {
   --summary             Print some helpful information at the end of a build
   --target=...          Environment target (e.g. es2017, chrome58, firefox57,
                         safari11, edge16, node10, default esnext)
+  --watch               Watch mode: rebuild on file system changes
 
 ` + colors.Bold + `Advanced options:` + colors.Default + `
   --banner=...              Text to be prepended to each output file
@@ -81,7 +82,7 @@ var helpText = func(colors logger.Colors) string {
   --tree-shaking=...        Set to "ignore-annotations" to work with packages
                             that have incorrect tree-shaking annotations
   --tsconfig=...            Use this tsconfig.json file instead of other ones
-  --version                 Print the current version and exit (` + esbuildVersion + `)
+  --version                 Print the current version (` + esbuildVersion + `) and exit
 
 ` + colors.Bold + `Examples:` + colors.Default + `
   ` + colors.Dim + `# Produces dist/entry_point.js and dist/entry_point.js.map` + colors.Default + `
@@ -227,10 +228,10 @@ func main() {
 				exitCode = cli.Run(osArgs)
 			}
 		} else {
-			// Don't disable the GC if this is a long-running server process
+			// Don't disable the GC if this is a long-running process
 			isServe := false
 			for _, arg := range osArgs {
-				if arg == "--serve" || strings.HasPrefix(arg, "--serve=") {
+				if arg == "--serve" || arg == "--watch" || strings.HasPrefix(arg, "--serve=") {
 					isServe = true
 					break
 				}

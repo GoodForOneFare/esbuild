@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/evanw/esbuild/internal/bundler"
@@ -511,19 +511,36 @@ func convertMessagesToInternal(msgs []logger.Msg, kind logger.MsgKind, messages 
 ////////////////////////////////////////////////////////////////////////////////
 // Build API
 
-func buildImpl(buildOpts BuildOptions) BuildResult {
+type internalBuildResult struct {
+	result    BuildResult
+	options   config.Options
+	watchData fs.WatchData
+}
+
+func buildImpl(buildOpts BuildOptions) internalBuildResult {
 	logOptions := logger.OutputOptions{
 		IncludeSource: true,
 		ErrorLimit:    buildOpts.ErrorLimit,
 		Color:         validateColor(buildOpts.Color),
 		LogLevel:      validateLogLevel(buildOpts.LogLevel),
+
+		// If there's a busy indicator, print a newline to avoid overwriting it
+		NewlineBeforeFirstMessage: buildOpts.Watch != nil && buildOpts.Watch.SpinnerBusy != "" && buildOpts.LogLevel == LogLevelInfo,
 	}
 	log := logger.NewStderrLog(logOptions)
-	realFS := fs.RealFS()
+
+	// Validate that the current working directory is an absolute path
+	realFS, err := fs.RealFS(fs.RealFSOptions{
+		AbsWorkingDir: buildOpts.AbsWorkingDir,
+	})
+	if err != nil {
+		log.AddError(nil, logger.Loc{}, err.Error())
+		return internalBuildResult{result: BuildResult{Errors: convertMessagesToPublic(logger.Error, log.Done())}}
+	}
 
 	// Do not re-evaluate plugins when rebuilding
 	plugins := loadPlugins(realFS, log, buildOpts.Plugins)
-	return rebuildImpl(buildOpts, cache.MakeCacheSet(), plugins, logOptions, log)
+	return rebuildImpl(buildOpts, cache.MakeCacheSet(), plugins, logOptions, log, false /* isRebuild */)
 }
 
 func rebuildImpl(
@@ -532,9 +549,17 @@ func rebuildImpl(
 	plugins []config.Plugin,
 	logOptions logger.OutputOptions,
 	log logger.Log,
-) BuildResult {
+	isRebuild bool,
+) internalBuildResult {
 	// Convert and validate the buildOpts
-	realFS := fs.RealFS()
+	realFS, err := fs.RealFS(fs.RealFSOptions{
+		AbsWorkingDir: buildOpts.AbsWorkingDir,
+		WantWatchData: buildOpts.Watch != nil,
+	})
+	if err != nil {
+		// This should already have been checked above
+		panic(err.Error())
+	}
 	jsFeatures, cssFeatures := validateFeatures(log, buildOpts.Target, buildOpts.Engines)
 	outJS, outCSS := validateOutputExtensions(log, buildOpts.OutExtensions)
 	defines, injectedDefines := validateDefines(log, buildOpts.Define, buildOpts.Pure)
@@ -574,6 +599,7 @@ func rebuildImpl(
 		InjectAbsPaths:        make([]string, len(buildOpts.Inject)),
 		Banner:                buildOpts.Banner,
 		Footer:                buildOpts.Footer,
+		WatchMode:             buildOpts.Watch != nil,
 		Plugins:               plugins,
 	}
 	for i, path := range buildOpts.Inject {
@@ -657,12 +683,14 @@ func rebuildImpl(
 	}
 
 	var outputFiles []OutputFile
+	var watchData fs.WatchData
 
 	// Stop now if there were errors
 	if !log.HasErrors() {
 		// Scan over the bundle
 		resolver := resolver.NewResolver(realFS, log, caches, options)
 		bundle := bundler.ScanBundle(log, realFS, resolver, caches, entryPoints, options)
+		watchData = realFS.WatchData()
 
 		// Stop now if there were errors
 		if !log.HasErrors() {
@@ -689,7 +717,7 @@ func rebuildImpl(
 							go func(result bundler.OutputFile) {
 								fs.BeforeFileOpen()
 								defer fs.AfterFileClose()
-								if err := os.MkdirAll(filepath.Dir(result.AbsPath), 0755); err != nil {
+								if err := os.MkdirAll(realFS.Dir(result.AbsPath), 0755); err != nil {
 									log.AddError(nil, logger.Loc{}, fmt.Sprintf(
 										"Failed to create output directory: %s", err.Error()))
 								} else {
@@ -724,20 +752,201 @@ func rebuildImpl(
 		}
 	}
 
-	var rebuild func() BuildResult
-	if buildOpts.Incremental {
-		rebuild = func() BuildResult {
-			return rebuildImpl(buildOpts, caches, plugins, logOptions, logger.NewStderrLog(logOptions))
+	// End the log now, which may print a message
+	msgs := log.Done()
+
+	// Start watching, but only for the top-level build
+	var watch *watcher
+	var stop func()
+	if buildOpts.Watch != nil && !isRebuild {
+		onRebuild := buildOpts.Watch.OnRebuild
+		watch = &watcher{
+			data: watchData,
+			rebuild: func() fs.WatchData {
+				value := rebuildImpl(buildOpts, caches, plugins, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */)
+				if onRebuild != nil {
+					go onRebuild(value.result)
+				}
+				return value.watchData
+			},
+		}
+		mode := *buildOpts.Watch
+		mode.SpinnerIdle = append([]string{}, mode.SpinnerIdle...) // Clone in case of mutation
+		watch.start(buildOpts.LogLevel, mode)
+		stop = func() {
+			watch.stop()
 		}
 	}
 
-	msgs := log.Done()
-	return BuildResult{
+	var rebuild func() BuildResult
+	if buildOpts.Incremental {
+		rebuild = func() BuildResult {
+			value := rebuildImpl(buildOpts, caches, plugins, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */)
+			if watch != nil {
+				watch.setWatchData(value.watchData)
+			}
+			return value.result
+		}
+	}
+
+	result := BuildResult{
 		Errors:      convertMessagesToPublic(logger.Error, msgs),
 		Warnings:    convertMessagesToPublic(logger.Warning, msgs),
 		OutputFiles: outputFiles,
 		Rebuild:     rebuild,
+		Stop:        stop,
 	}
+	return internalBuildResult{
+		result:    result,
+		options:   options,
+		watchData: watchData,
+	}
+}
+
+type watcher struct {
+	mutex             sync.Mutex
+	data              fs.WatchData
+	shouldStop        int32
+	rebuild           func() fs.WatchData
+	recentItems       []string
+	itemsToScan       []string
+	itemsPerIteration int
+}
+
+func (w *watcher) setWatchData(data fs.WatchData) {
+	defer w.mutex.Unlock()
+	w.mutex.Lock()
+	w.data = data
+	w.itemsToScan = w.itemsToScan[:0] // Reuse memory
+
+	// Remove any recent items that weren't a part of the latest build
+	end := 0
+	for _, path := range w.recentItems {
+		if data.Paths[path] != nil {
+			w.recentItems[end] = path
+			end++
+		}
+	}
+	w.recentItems = w.recentItems[:end]
+}
+
+// The time to wait between watch intervals
+const watchIntervalSleep = 100 * time.Millisecond
+
+// The maximum number of recently-edited items to check every interval
+const maxRecentItemCount = 16
+
+// The minimum number of non-recent items to check every interval
+const minItemCountPerIter = 64
+
+// The maximum number of intervals before a change is detected
+const maxIntervalsBeforeUpdate = 20
+
+// The interval multiple used to update the spinner (larger values are slower)
+const spinnerUpdatePeriod = 5
+
+func (w *watcher) start(logLevel LogLevel, mode WatchMode) {
+	go func() {
+		index := 0
+		delay := 0
+		for atomic.LoadInt32(&w.shouldStop) == 0 {
+			// Render the spinner animation
+			if logLevel == LogLevelInfo && len(mode.SpinnerIdle) > 0 {
+				if delay == 0 {
+					fmt.Fprintf(os.Stderr, "\r%s", mode.SpinnerIdle[index])
+					index++
+					if index == len(mode.SpinnerIdle) {
+						index = 0
+					}
+				}
+				delay++
+				if delay == spinnerUpdatePeriod {
+					delay = 0
+				}
+			}
+
+			// Sleep for the watch interval
+			time.Sleep(watchIntervalSleep)
+
+			// Rebuild if we're dirty
+			if path := w.tryToFindDirtyPath(); path != "" {
+				// Show the busy indicator
+				if logLevel == LogLevelInfo && mode.SpinnerBusy != "" {
+					fmt.Fprintf(os.Stderr, "\r%s", mode.SpinnerBusy)
+				}
+
+				// Run the build
+				w.setWatchData(w.rebuild())
+
+				// Reset the spinner animation
+				index = 0
+				delay = 0
+			}
+		}
+	}()
+}
+
+func (w *watcher) stop() {
+	atomic.StoreInt32(&w.shouldStop, 1)
+}
+
+func (w *watcher) tryToFindDirtyPath() string {
+	defer w.mutex.Unlock()
+	w.mutex.Lock()
+
+	// If we ran out of items to scan, fill the items back up in a random order
+	if len(w.itemsToScan) == 0 {
+		items := w.itemsToScan[:0] // Reuse memory
+		for path := range w.data.Paths {
+			items = append(items, path)
+		}
+		rand.Seed(time.Now().UnixNano())
+		for i := int32(len(items) - 1); i > 0; i-- { // Fisher–Yates shuffle
+			j := rand.Int31n(i + 1)
+			items[i], items[j] = items[j], items[i]
+		}
+		w.itemsToScan = items
+
+		// Determine how many items to check every iteration, rounded up
+		perIter := (len(items) + maxIntervalsBeforeUpdate - 1) / maxIntervalsBeforeUpdate
+		if perIter < minItemCountPerIter {
+			perIter = minItemCountPerIter
+		}
+		w.itemsPerIteration = perIter
+	}
+
+	// Always check all recent items every iteration
+	for i, path := range w.recentItems {
+		if w.data.Paths[path]() {
+			// Move this path to the back of the list (i.e. the "most recent" position)
+			copy(w.recentItems[i:], w.recentItems[i+1:])
+			w.recentItems[len(w.recentItems)-1] = path
+			return path
+		}
+	}
+
+	// Check a constant number of items every iteration
+	remainingCount := len(w.itemsToScan) - w.itemsPerIteration
+	if remainingCount < 0 {
+		remainingCount = 0
+	}
+	toCheck, remaining := w.itemsToScan[remainingCount:], w.itemsToScan[:remainingCount]
+	w.itemsToScan = remaining
+
+	// Check if any of the entries in this iteration have been modified
+	for _, path := range toCheck {
+		if w.data.Paths[path]() {
+			// Mark this item as recent by adding it to the back of the list
+			w.recentItems = append(w.recentItems, path)
+			if len(w.recentItems) > maxRecentItemCount {
+				// Remove items from the front of the list when we hit the limit
+				copy(w.recentItems, w.recentItems[1:])
+				w.recentItems = w.recentItems[:maxRecentItemCount]
+			}
+			return path
+		}
+	}
+	return ""
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -902,6 +1111,7 @@ func (impl *pluginImpl) OnResolve(options OnResolveOptions, callback func(OnReso
 				Importer:   args.Importer.Text,
 				Namespace:  args.Importer.Namespace,
 				ResolveDir: args.ResolveDir,
+				PluginData: args.PluginData,
 			})
 			result.PluginName = response.PluginName
 
@@ -912,6 +1122,7 @@ func (impl *pluginImpl) OnResolve(options OnResolveOptions, callback func(OnReso
 
 			result.Path = logger.Path{Text: response.Path, Namespace: response.Namespace}
 			result.External = response.External
+			result.PluginData = response.PluginData
 
 			// Convert log messages
 			if len(response.Errors)+len(response.Warnings) > 0 {
@@ -938,8 +1149,9 @@ func (impl *pluginImpl) OnLoad(options OnLoadOptions, callback func(OnLoadArgs) 
 		Namespace: options.Namespace,
 		Callback: func(args config.OnLoadArgs) (result config.OnLoadResult) {
 			response, err := callback(OnLoadArgs{
-				Path:      args.Path.Text,
-				Namespace: args.Path.Namespace,
+				Path:       args.Path.Text,
+				Namespace:  args.Path.Namespace,
+				PluginData: args.PluginData,
 			})
 			result.PluginName = response.PluginName
 
@@ -950,6 +1162,7 @@ func (impl *pluginImpl) OnLoad(options OnLoadOptions, callback func(OnLoadArgs) 
 
 			result.Contents = response.Contents
 			result.Loader = validateLoader(response.Loader)
+			result.PluginData = response.PluginData
 			pathKind := fmt.Sprintf("resolve directory path for plugin %q", impl.plugin.Name)
 			if absPath := validatePath(impl.log, impl.fs, response.ResolveDir, pathKind); absPath != "" {
 				result.AbsResolveDir = absPath
@@ -992,10 +1205,11 @@ func loadPlugins(fs fs.FS, log logger.Log, plugins []Plugin) (results []config.P
 
 type apiHandler struct {
 	mutex        sync.Mutex
-	outdir       string
+	options      *config.Options
 	onRequest    func(ServeOnRequestArgs)
 	rebuild      func() BuildResult
 	currentBuild *runningBuild
+	fs           fs.FS
 }
 
 type runningBuild struct {
@@ -1107,7 +1321,7 @@ func (h *apiHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 		// Check the output files for a match
 		for _, file := range result.OutputFiles {
-			if relPath, err := filepath.Rel(h.outdir, file.Path); err == nil {
+			if relPath, ok := h.fs.Rel(h.options.AbsOutputDir, file.Path); ok {
 				relPath = strings.ReplaceAll(relPath, "\\", "/")
 
 				// An exact match
@@ -1169,13 +1383,27 @@ func (h *apiHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 }
 
 func serveImpl(serveOptions ServeOptions, buildOptions BuildOptions) (ServeResult, error) {
-	// The output directory isn't actually ever written to. It just needs to be
-	// very unlikely to be used as a source file so it doesn't collide.
-	outdir := filepath.Join(os.TempDir(), strconv.FormatInt(rand.NewSource(time.Now().Unix()).Int63(), 36))
+	realFS, err := fs.RealFS(fs.RealFSOptions{
+		AbsWorkingDir: buildOptions.AbsWorkingDir,
+	})
+	if err != nil {
+		return ServeResult{}, err
+	}
 	buildOptions.Incremental = true
 	buildOptions.Write = false
-	buildOptions.Outfile = ""
-	buildOptions.Outdir = outdir
+
+	// Watch and serve are both different ways of rebuilding, and cannot be combined
+	if buildOptions.Watch != nil {
+		return ServeResult{}, fmt.Errorf("Cannot use \"watch\" with \"serve\"")
+	}
+
+	// If there is no output directory, set the output directory to something so
+	// the build doesn't try to write to stdout. Make sure not to set this to a
+	// path that may contain the user's files in it since we don't want to get
+	// errors about overwriting input files.
+	if buildOptions.Outdir == "" && buildOptions.Outfile == "" {
+		buildOptions.Outdir = realFS.Join(realFS.Cwd(), "...")
+	}
 
 	// Pick the port
 	var listener net.Listener
@@ -1214,10 +1442,17 @@ func serveImpl(serveOptions ServeOptions, buildOptions BuildOptions) (ServeResul
 	}
 
 	// The first build will just build normally
-	handler := &apiHandler{
-		outdir:    outdir,
+	var handler *apiHandler
+	handler = &apiHandler{
 		onRequest: serveOptions.OnRequest,
-		rebuild:   func() BuildResult { return Build(buildOptions) },
+		rebuild: func() BuildResult {
+			build := buildImpl(buildOptions)
+			if handler.options == nil {
+				handler.options = &build.options
+			}
+			return build.result
+		},
+		fs: realFS,
 	}
 
 	// Start the server

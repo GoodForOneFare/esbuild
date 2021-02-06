@@ -1,4 +1,4 @@
-const { installForTests, removeRecursiveSync } = require('./esbuild')
+const { installForTests, removeRecursiveSync, writeFileAtomic } = require('./esbuild')
 const assert = require('assert')
 const path = require('path')
 const util = require('util')
@@ -23,7 +23,11 @@ let pluginTests = {
       })
       throw new Error('Expected an error to be thrown')
     } catch (e) {
-      assert.strictEqual(e.message, 'Cannot use plugins in synchronous API calls')
+      assert.strictEqual(e.message.split('\n')[0], 'Build failed with 1 error:')
+      assert.notStrictEqual(e.errors, void 0)
+      assert.strictEqual(e.errors.length, 1)
+      assert.strictEqual(e.errors[0].text, 'Cannot use plugins in synchronous API calls')
+      assert.deepStrictEqual(e.warnings, [])
     }
   },
 
@@ -94,7 +98,11 @@ let pluginTests = {
         }],
       })
     } catch (e) {
-      assert.strictEqual(e.message, 'Plugin at index 0 is missing a name')
+      assert.strictEqual(e.message.split('\n')[0], 'Build failed with 1 error:')
+      assert.notStrictEqual(e.errors, void 0)
+      assert.strictEqual(e.errors.length, 1)
+      assert.strictEqual(e.errors[0].text, 'Plugin at index 0 is missing a name')
+      assert.deepStrictEqual(e.warnings, [])
     }
   },
 
@@ -108,7 +116,11 @@ let pluginTests = {
         }],
       })
     } catch (e) {
-      assert.strictEqual(e.message, '[x] Plugin is missing a setup function')
+      assert.strictEqual(e.message.split('\n')[0], 'Build failed with 1 error:')
+      assert.notStrictEqual(e.errors, void 0)
+      assert.strictEqual(e.errors.length, 1)
+      assert.strictEqual(e.errors[0].text, '[x] Plugin is missing a setup function')
+      assert.deepStrictEqual(e.warnings, [])
     }
   },
 
@@ -125,7 +137,11 @@ let pluginTests = {
         }],
       })
     } catch (e) {
-      assert.strictEqual(e.message, `Invalid option on plugin "x": "someRandomProperty"`)
+      assert.strictEqual(e.message.split('\n')[0], 'Build failed with 1 error:')
+      assert.notStrictEqual(e.errors, void 0)
+      assert.strictEqual(e.errors.length, 1)
+      assert.strictEqual(e.errors[0].text, 'Invalid option on plugin "x": "someRandomProperty"')
+      assert.deepStrictEqual(e.warnings, [])
     }
   },
 
@@ -143,7 +159,11 @@ let pluginTests = {
         }],
       })
     } catch (e) {
-      assert.strictEqual(e.message, `Invalid option in onResolve() call for plugin "x": "whatIsThis"`)
+      assert.strictEqual(e.message.split('\n')[0], 'Build failed with 1 error:')
+      assert.notStrictEqual(e.errors, void 0)
+      assert.strictEqual(e.errors.length, 1)
+      assert.strictEqual(e.errors[0].text, 'Invalid option in onResolve() call for plugin "x": "whatIsThis"')
+      assert.deepStrictEqual(e.warnings, [])
     }
 
     try {
@@ -197,7 +217,11 @@ let pluginTests = {
         }],
       })
     } catch (e) {
-      assert.strictEqual(e.message, `Invalid option in onLoad() call for plugin "x": "whatIsThis"`)
+      assert.strictEqual(e.message.split('\n')[0], 'Build failed with 1 error:')
+      assert.notStrictEqual(e.errors, void 0)
+      assert.strictEqual(e.errors.length, 1)
+      assert.strictEqual(e.errors[0].text, 'Invalid option in onLoad() call for plugin "x": "whatIsThis"')
+      assert.deepStrictEqual(e.warnings, [])
     }
 
     try {
@@ -747,7 +771,8 @@ let pluginTests = {
     const output = path.join(testDir, 'out.js')
     await esbuild.build({
       stdin: {
-        contents: `import x from "plugin"; export default x`, sourcefile: 'stdin-sourcefile',
+        contents: `import x from "plugin"; export default x`,
+        sourcefile: 'stdin-sourcefile',
       },
       bundle: true, outfile: output, format: 'cjs', plugins: [{
         name: 'name',
@@ -773,7 +798,8 @@ let pluginTests = {
     const output = path.join(testDir, 'out.js')
     await esbuild.build({
       stdin: {
-        contents: `import x from "plugin"; export default x`, sourcefile: 'stdin-sourcefile',
+        contents: `import x from "plugin"; export default x`,
+        sourcefile: 'stdin-sourcefile',
         resolveDir: testDir,
       },
       bundle: true, outfile: output, format: 'cjs', plugins: [{
@@ -800,7 +826,8 @@ let pluginTests = {
     const output = path.join(testDir, 'out.js')
     await esbuild.build({
       stdin: {
-        contents: `import x from "plugin"; export default x`, sourcefile: path.join(testDir, 'stdin-sourcefile'),
+        contents: `import x from "plugin"; export default x`,
+        sourcefile: path.join(testDir, 'stdin-sourcefile'),
         resolveDir: testDir,
       },
       bundle: true, outfile: output, format: 'cjs', plugins: [{
@@ -826,7 +853,9 @@ let pluginTests = {
   async stdinRelative({ esbuild, testDir }) {
     const output = path.join(testDir, 'out.js')
     await esbuild.build({
-      stdin: { contents: `import x from "./stdinRelative.js"; export default x` },
+      stdin: {
+        contents: `import x from "./stdinRelative.js"; export default x`,
+      },
       bundle: true, outfile: output, format: 'cjs', plugins: [{
         name: 'name',
         setup(build) {
@@ -851,7 +880,8 @@ let pluginTests = {
     const output = path.join(testDir, 'out', 'out.js')
     await esbuild.build({
       stdin: {
-        contents: `import x from "./stdinRelative.js"; export default x`, resolveDir: testDir,
+        contents: `import x from "./stdinRelative.js"; export default x`,
+        resolveDir: testDir,
       },
       bundle: true, outfile: output, format: 'cjs', plugins: [{
         name: 'name',
@@ -1175,6 +1205,154 @@ let pluginTests = {
     assert.strictEqual(result.warnings.length, 1)
     assert.strictEqual(result.warnings[0].text, '[plugin] some warning')
     assert.strictEqual(result.warnings[0].detail, theError)
+  },
+
+  async pluginDataResolveToLoad({ esbuild }) {
+    const theObject = {}
+    const result = await esbuild.build({
+      entryPoints: ['entry'],
+      write: false,
+      plugins: [{
+        name: 'plugin',
+        setup(build) {
+          build.onResolve({ filter: /.*/ }, () => ({
+            path: 'abc',
+            namespace: 'xyz',
+            pluginData: theObject,
+          }))
+          build.onLoad({ filter: /.*/ }, args => {
+            assert.strictEqual(args.pluginData, theObject)
+            return { contents: 'foo()' };
+          })
+        },
+      }],
+    })
+    assert.strictEqual(result.outputFiles[0].text, 'foo();\n')
+  },
+
+  async pluginDataResolveToLoadNested({ esbuild }) {
+    const theObject = {}
+    const result = await esbuild.build({
+      entryPoints: ['entry'],
+      write: false,
+      bundle: true,
+      format: 'esm',
+      plugins: [{
+        name: 'plugin',
+        setup(build) {
+          build.onResolve({ filter: /.*/ }, args => {
+            if (args.path === 'entry') return { path: 'entry', namespace: 'xyz' }
+            return {
+              path: 'nested',
+              namespace: 'xyz',
+              pluginData: theObject,
+            }
+          })
+          build.onLoad({ filter: /.*/ }, args => {
+            if (args.path === 'entry') return { contents: 'import "nested"' };
+            assert.strictEqual(args.pluginData, theObject)
+            return { contents: 'foo()' };
+          })
+        },
+      }],
+    })
+    assert.strictEqual(result.outputFiles[0].text, '// xyz:nested\nfoo();\n')
+  },
+
+  async pluginDataLoadToResolve({ esbuild }) {
+    const theObject = {}
+    const result = await esbuild.build({
+      entryPoints: ['entry'],
+      write: false,
+      plugins: [{
+        name: 'plugin',
+        setup(build) {
+          build.onResolve({ filter: /.*/ }, args => {
+            if (args === 'import') {
+              assert.strictEqual(args.pluginData, theObject)
+              return { external: true }
+            }
+            return { path: 'abc', namespace: 'xyz' }
+          })
+          build.onLoad({ filter: /.*/ }, () => ({
+            contents: 'import("import")',
+            pluginData: theObject,
+          }))
+        },
+      }],
+    })
+    assert.strictEqual(result.outputFiles[0].text, 'import("import");\n')
+  },
+
+  async pluginWithWatchMode({ esbuild, service, testDir }) {
+    for (const toTest of [esbuild, service]) {
+      const srcDir = path.join(testDir, 'src')
+      const outfile = path.join(testDir, 'out.js')
+      const input = path.join(srcDir, 'in.js')
+      const example = path.join(srcDir, 'example.js')
+      await mkdirAsync(srcDir, { recursive: true })
+      await writeFileAsync(input, `import {x} from "./example.js"; exports.x = x`)
+      await writeFileAsync(example, `export let x = 1`)
+
+      let onRebuild = () => { }
+      const result = await toTest.build({
+        entryPoints: [input],
+        outfile,
+        format: 'cjs',
+        watch: {
+          onRebuild: (...args) => onRebuild(args),
+        },
+        bundle: true,
+        plugins: [
+          {
+            name: 'some-plugin',
+            setup(build) {
+              build.onLoad({ filter: /example\.js$/ }, async (args) => {
+                const contents = await fs.promises.readFile(args.path, 'utf8')
+                return { contents }
+              })
+            },
+          },
+        ],
+      })
+      const rebuildUntil = (mutator, condition) => {
+        let timeout
+        return new Promise((resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error('Timeout after 30 seconds')), 30 * 1000)
+          onRebuild = args => {
+            try { if (condition(...args)) clearTimeout(timeout), resolve(args) }
+            catch (e) { clearTimeout(timeout), reject(e) }
+          }
+          mutator()
+        })
+      }
+
+      try {
+        let code = await readFileAsync(outfile, 'utf8')
+        let exports = {}
+        new Function('exports', code)(exports)
+        assert.strictEqual(result.outputFiles, void 0)
+        assert.strictEqual(typeof result.stop, 'function')
+        assert.strictEqual(exports.x, 1)
+
+        // First rebuild: edit
+        {
+          const [error2, result2] = await rebuildUntil(
+            () => writeFileAtomic(example, `export let x = 2`),
+            () => fs.readFileSync(outfile, 'utf8') !== code,
+          )
+          code = await readFileAsync(outfile, 'utf8')
+          exports = {}
+          new Function('exports', code)(exports)
+          assert.strictEqual(error2, null)
+          assert.strictEqual(result2.outputFiles, void 0)
+          assert.strictEqual(result2.stop, result.stop)
+          assert.strictEqual(exports.x, 2)
+        }
+      } finally {
+        result.stop()
+      }
+    }
   },
 }
 

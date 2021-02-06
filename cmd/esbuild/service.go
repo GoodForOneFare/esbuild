@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/evanw/esbuild/internal/cli_helpers"
 	"github.com/evanw/esbuild/internal/config"
@@ -25,15 +26,18 @@ import (
 
 type responseCallback = func(interface{})
 type rebuildCallback = func(uint32) []byte
+type watchStopCallback = func()
 type serverStopCallback = func()
 
 type serviceType struct {
 	mutex           sync.Mutex
 	callbacks       map[uint32]responseCallback
 	rebuilds        map[int]rebuildCallback
+	watchStops      map[int]watchStopCallback
 	serveStops      map[int]serverStopCallback
 	nextID          uint32
 	nextRebuildID   int
+	nextWatchID     int
 	outgoingPackets chan outgoingPacket
 }
 
@@ -46,6 +50,7 @@ func runService() {
 	service := serviceType{
 		callbacks:       make(map[uint32]responseCallback),
 		rebuilds:        make(map[int]rebuildCallback),
+		watchStops:      make(map[int]watchStopCallback),
 		serveStops:      make(map[int]serverStopCallback),
 		outgoingPackets: make(chan outgoingPacket),
 	}
@@ -60,7 +65,9 @@ func runService() {
 			if !ok {
 				break // No more packets
 			}
-			os.Stdout.Write(packet.bytes)
+			if _, err := os.Stdout.Write(packet.bytes); err != nil {
+				os.Exit(1) // I/O error
+			}
 
 			// Only signal that this request is done when it has actually been written
 			if packet.refCount != 0 {
@@ -71,6 +78,19 @@ func runService() {
 
 	// The protocol always starts with the version
 	os.Stdout.Write(append(writeUint32(nil, uint32(len(esbuildVersion))), esbuildVersion...))
+
+	// Periodically ping the host even when we're idle. This will catch cases
+	// where the host has disappeared and will never send us anything else but
+	// we incorrectly think we are still needed. In that case we will now try
+	// to write to stdout and fail, and then know that we should exit.
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			service.sendRequest(map[string]interface{}{
+				"command": "ping",
+			})
+		}
+	}()
 
 	for {
 		// Read more data from stdin
@@ -194,6 +214,32 @@ func (service *serviceType) handleIncomingPacket(bytes []byte) (result outgoingP
 				bytes: rebuild(p.id),
 			}
 
+		case "watch-stop":
+			watchID := request["watchID"].(int)
+			refCount := 0
+			watchStop := func() watchStopCallback {
+				// Only mutate the map while inside a mutex
+				service.mutex.Lock()
+				defer service.mutex.Unlock()
+				if watchStop, ok := service.watchStops[watchID]; ok {
+					// This watch is now considered finished. This matches the +1 reference
+					// count at the return of the build call.
+					refCount = -1
+					return watchStop
+				}
+				return nil
+			}()
+			if watchStop != nil {
+				watchStop()
+			}
+			return outgoingPacket{
+				bytes: encodePacket(packet{
+					id:    p.id,
+					value: make(map[string]interface{}),
+				}),
+				refCount: refCount,
+			}
+
 		case "serve-stop":
 			serveID := request["serveID"].(int)
 			refCount := 0
@@ -227,7 +273,7 @@ func (service *serviceType) handleIncomingPacket(bytes []byte) (result outgoingP
 				// Only mutate the map while inside a mutex
 				service.mutex.Lock()
 				defer service.mutex.Unlock()
-				if _, ok := service.rebuilds[rebuildID]; !ok {
+				if _, ok := service.rebuilds[rebuildID]; ok {
 					// This build is now considered finished. This matches the +1 reference
 					// count at the return of the first build call for this rebuild chain.
 					refCount = -1
@@ -276,6 +322,10 @@ func (service *serviceType) handleIncomingPacket(bytes []byte) (result outgoingP
 		return callback
 	}()
 
+	if callback == nil {
+		panic(fmt.Sprintf("callback nil for id %d, value %v", p.id, p.value))
+	}
+
 	callback(p.value)
 	return outgoingPacket{}
 }
@@ -293,10 +343,12 @@ func (service *serviceType) handleBuildRequest(id uint32, request map[string]int
 	key := request["key"].(int)
 	write := request["write"].(bool)
 	incremental := request["incremental"].(bool)
-	serve, isServe := request["serve"].(interface{})
+	hasOnRebuild := request["hasOnRebuild"].(bool)
+	serveObj, isServe := request["serve"].(interface{})
 	flags := decodeStringArray(request["flags"].([]interface{}))
 
 	options, err := cli.ParseBuildOptions(flags)
+	options.AbsWorkingDir = request["absWorkingDir"].(string)
 
 	// Normally when "write" is true and there is no output file/directory then
 	// the output is written to stdout instead. However, we're currently using
@@ -327,252 +379,24 @@ func (service *serviceType) handleBuildRequest(id uint32, request map[string]int
 	}
 
 	if plugins, ok := request["plugins"]; ok {
-		plugins := plugins.([]interface{})
-
-		type filteredCallback struct {
-			filter     *regexp.Regexp
-			pluginName string
-			namespace  string
-			id         int
+		if plugins, err := service.convertPlugins(key, plugins); err != nil {
+			return outgoingPacket{bytes: encodeErrorPacket(id, err)}
+		} else {
+			options.Plugins = plugins
 		}
-
-		var onResolveCallbacks []filteredCallback
-		var onLoadCallbacks []filteredCallback
-
-		filteredCallbacks := func(pluginName string, kind string, items []interface{}) (result []filteredCallback, err error) {
-			for _, item := range items {
-				item := item.(map[string]interface{})
-				filter, err := config.CompileFilterForPlugin(pluginName, kind, item["filter"].(string))
-				if err != nil {
-					return nil, err
-				}
-				result = append(result, filteredCallback{
-					pluginName: pluginName,
-					id:         item["id"].(int),
-					filter:     filter,
-					namespace:  item["namespace"].(string),
-				})
-			}
-			return
-		}
-
-		for _, p := range plugins {
-			p := p.(map[string]interface{})
-			pluginName := p["name"].(string)
-
-			if callbacks, err := filteredCallbacks(pluginName, "onResolve", p["onResolve"].([]interface{})); err != nil {
-				return outgoingPacket{bytes: encodeErrorPacket(id, err)}
-			} else {
-				onResolveCallbacks = append(onResolveCallbacks, callbacks...)
-			}
-
-			if callbacks, err := filteredCallbacks(pluginName, "onLoad", p["onLoad"].([]interface{})); err != nil {
-				return outgoingPacket{bytes: encodeErrorPacket(id, err)}
-			} else {
-				onLoadCallbacks = append(onLoadCallbacks, callbacks...)
-			}
-		}
-
-		// We want to minimize the amount of IPC traffic. Instead of adding one Go
-		// plugin for every JavaScript plugin, we just add a single Go plugin that
-		// proxies the plugin queries to the list of JavaScript plugins in the host.
-		options.Plugins = append(options.Plugins, api.Plugin{
-			Name: "JavaScript plugins",
-			Setup: func(build api.PluginBuild) {
-				build.OnResolve(api.OnResolveOptions{Filter: ".*"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-					var ids []interface{}
-					applyPath := logger.Path{Text: args.Path, Namespace: args.Namespace}
-					for _, item := range onResolveCallbacks {
-						if config.PluginAppliesToPath(applyPath, item.filter, item.namespace) {
-							ids = append(ids, item.id)
-						}
-					}
-
-					result := api.OnResolveResult{}
-					if len(ids) == 0 {
-						return result, nil
-					}
-
-					response := service.sendRequest(map[string]interface{}{
-						"command":    "resolve",
-						"key":        key,
-						"ids":        ids,
-						"path":       args.Path,
-						"importer":   args.Importer,
-						"namespace":  args.Namespace,
-						"resolveDir": args.ResolveDir,
-					}).(map[string]interface{})
-
-					if value, ok := response["id"]; ok {
-						id := value.(int)
-						for _, item := range onResolveCallbacks {
-							if item.id == id {
-								result.PluginName = item.pluginName
-								break
-							}
-						}
-					}
-					if value, ok := response["error"]; ok {
-						return result, errors.New(value.(string))
-					}
-					if value, ok := response["pluginName"]; ok {
-						result.PluginName = value.(string)
-					}
-					if value, ok := response["path"]; ok {
-						result.Path = value.(string)
-					}
-					if value, ok := response["namespace"]; ok {
-						result.Namespace = value.(string)
-					}
-					if value, ok := response["external"]; ok {
-						result.External = value.(bool)
-					}
-					if value, ok := response["errors"]; ok {
-						result.Errors = decodeMessages(value.([]interface{}))
-					}
-					if value, ok := response["warnings"]; ok {
-						result.Warnings = decodeMessages(value.([]interface{}))
-					}
-
-					return result, nil
-				})
-
-				build.OnLoad(api.OnLoadOptions{Filter: ".*"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-					var ids []interface{}
-					applyPath := logger.Path{Text: args.Path, Namespace: args.Namespace}
-					for _, item := range onLoadCallbacks {
-						if config.PluginAppliesToPath(applyPath, item.filter, item.namespace) {
-							ids = append(ids, item.id)
-						}
-					}
-
-					result := api.OnLoadResult{}
-					if len(ids) == 0 {
-						return result, nil
-					}
-
-					response := service.sendRequest(map[string]interface{}{
-						"command":   "load",
-						"key":       key,
-						"ids":       ids,
-						"path":      args.Path,
-						"namespace": args.Namespace,
-					}).(map[string]interface{})
-
-					if value, ok := response["id"]; ok {
-						id := value.(int)
-						for _, item := range onLoadCallbacks {
-							if item.id == id {
-								result.PluginName = item.pluginName
-								break
-							}
-						}
-					}
-					if value, ok := response["error"]; ok {
-						return result, errors.New(value.(string))
-					}
-					if value, ok := response["pluginName"]; ok {
-						result.PluginName = value.(string)
-					}
-					if value, ok := response["contents"]; ok {
-						contents := string(value.([]byte))
-						result.Contents = &contents
-					}
-					if value, ok := response["resolveDir"]; ok {
-						result.ResolveDir = value.(string)
-					}
-					if value, ok := response["errors"]; ok {
-						result.Errors = decodeMessages(value.([]interface{}))
-					}
-					if value, ok := response["warnings"]; ok {
-						result.Warnings = decodeMessages(value.([]interface{}))
-					}
-					if value, ok := response["loader"]; ok {
-						loader, err := cli_helpers.ParseLoader(value.(string))
-						if err != nil {
-							return api.OnLoadResult{}, err
-						}
-						result.Loader = loader
-					}
-
-					return result, nil
-				})
-			},
-		})
 	}
 
 	if isServe {
-		var serveOptions api.ServeOptions
-		serve := serve.(map[string]interface{})
-		serveID := serve["serveID"].(int)
-		if port, ok := serve["port"]; ok {
-			serveOptions.Port = uint16(port.(int))
-		}
-		if host, ok := serve["host"]; ok {
-			serveOptions.Host = host.(string)
-		}
-		serveOptions.OnRequest = func(args api.ServeOnRequestArgs) {
-			service.sendRequest(map[string]interface{}{
-				"command": "serve-request",
-				"serveID": serveID,
-				"args": map[string]interface{}{
-					"remoteAddress": args.RemoteAddress,
-					"method":        args.Method,
-					"path":          args.Path,
-					"status":        args.Status,
-					"timeInMS":      args.TimeInMS,
-				},
-			})
-		}
-		result, err := api.Serve(serveOptions, options)
-		if err != nil {
-			return outgoingPacket{bytes: encodeErrorPacket(id, err)}
-		}
-		response := map[string]interface{}{
-			"port": int(result.Port),
-			"host": result.Host,
-		}
-
-		// Asynchronously wait for the server to stop, then fulfil the "wait" promise
-		go func() {
-			request := map[string]interface{}{
-				"command": "serve-wait",
-				"serveID": serveID,
-			}
-			if err := result.Wait(); err != nil {
-				request["error"] = err.Error()
-			} else {
-				request["error"] = nil
-			}
-			service.sendRequest(request)
-
-			// Only mutate the map while inside a mutex
-			service.mutex.Lock()
-			defer service.mutex.Unlock()
-			delete(service.serveStops, serveID)
-		}()
-
-		func() {
-			// Only mutate the map while inside a mutex
-			service.mutex.Lock()
-			defer service.mutex.Unlock()
-			service.serveStops[serveID] = result.Stop
-		}()
-
-		return outgoingPacket{
-			bytes: encodePacket(packet{
-				id:    id,
-				value: response,
-			}),
-
-			// Make sure the serve doesn't finish until "stop" has been called
-			refCount: 1,
-		}
+		return service.handleServeRequest(id, options, serveObj)
 	}
 
 	rebuildID := service.nextRebuildID
+	watchID := service.nextWatchID
 	if incremental {
 		service.nextRebuildID++
+	}
+	if options.Watch != nil {
+		service.nextWatchID++
 	}
 
 	resultToResponse := func(result api.BuildResult) map[string]interface{} {
@@ -587,7 +411,20 @@ func (service *serviceType) handleBuildRequest(id uint32, request map[string]int
 		if incremental {
 			response["rebuildID"] = rebuildID
 		}
+		if options.Watch != nil {
+			response["watchID"] = watchID
+		}
 		return response
+	}
+
+	if options.Watch != nil && hasOnRebuild {
+		options.Watch.OnRebuild = func(result api.BuildResult) {
+			service.sendRequest(map[string]interface{}{
+				"command": "watch-rebuild",
+				"watchID": watchID,
+				"args":    resultToResponse(result),
+			})
+		}
 	}
 
 	options.Write = write
@@ -612,7 +449,21 @@ func (service *serviceType) handleBuildRequest(id uint32, request map[string]int
 		}()
 
 		// Make sure the build doesn't finish until "dispose" has been called
-		refCount = 1
+		refCount++
+	}
+
+	if options.Watch != nil {
+		func() {
+			// Only mutate the map while inside a mutex
+			service.mutex.Lock()
+			defer service.mutex.Unlock()
+			service.watchStops[watchID] = func() {
+				result.Stop()
+			}
+		}()
+
+		// Make sure the build doesn't finish until "stop" has been called
+		refCount++
 	}
 
 	return outgoingPacket{
@@ -622,6 +473,260 @@ func (service *serviceType) handleBuildRequest(id uint32, request map[string]int
 		}),
 		refCount: refCount,
 	}
+}
+
+func (service *serviceType) handleServeRequest(id uint32, options api.BuildOptions, serveObj interface{}) outgoingPacket {
+	var serveOptions api.ServeOptions
+	serve := serveObj.(map[string]interface{})
+	serveID := serve["serveID"].(int)
+	if port, ok := serve["port"]; ok {
+		serveOptions.Port = uint16(port.(int))
+	}
+	if host, ok := serve["host"]; ok {
+		serveOptions.Host = host.(string)
+	}
+	serveOptions.OnRequest = func(args api.ServeOnRequestArgs) {
+		service.sendRequest(map[string]interface{}{
+			"command": "serve-request",
+			"serveID": serveID,
+			"args": map[string]interface{}{
+				"remoteAddress": args.RemoteAddress,
+				"method":        args.Method,
+				"path":          args.Path,
+				"status":        args.Status,
+				"timeInMS":      args.TimeInMS,
+			},
+		})
+	}
+	result, err := api.Serve(serveOptions, options)
+	if err != nil {
+		return outgoingPacket{bytes: encodeErrorPacket(id, err)}
+	}
+	response := map[string]interface{}{
+		"port": int(result.Port),
+		"host": result.Host,
+	}
+
+	// Asynchronously wait for the server to stop, then fulfil the "wait" promise
+	go func() {
+		request := map[string]interface{}{
+			"command": "serve-wait",
+			"serveID": serveID,
+		}
+		if err := result.Wait(); err != nil {
+			request["error"] = err.Error()
+		} else {
+			request["error"] = nil
+		}
+		service.sendRequest(request)
+
+		// Only mutate the map while inside a mutex
+		service.mutex.Lock()
+		defer service.mutex.Unlock()
+		delete(service.serveStops, serveID)
+	}()
+
+	func() {
+		// Only mutate the map while inside a mutex
+		service.mutex.Lock()
+		defer service.mutex.Unlock()
+		service.serveStops[serveID] = result.Stop
+	}()
+
+	return outgoingPacket{
+		bytes: encodePacket(packet{
+			id:    id,
+			value: response,
+		}),
+
+		// Make sure the serve doesn't finish until "stop" has been called
+		refCount: 1,
+	}
+}
+
+func (service *serviceType) convertPlugins(key int, jsPlugins interface{}) ([]api.Plugin, error) {
+	var goPlugins []api.Plugin
+
+	type filteredCallback struct {
+		filter     *regexp.Regexp
+		pluginName string
+		namespace  string
+		id         int
+	}
+
+	var onResolveCallbacks []filteredCallback
+	var onLoadCallbacks []filteredCallback
+
+	filteredCallbacks := func(pluginName string, kind string, items []interface{}) (result []filteredCallback, err error) {
+		for _, item := range items {
+			item := item.(map[string]interface{})
+			filter, err := config.CompileFilterForPlugin(pluginName, kind, item["filter"].(string))
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, filteredCallback{
+				pluginName: pluginName,
+				id:         item["id"].(int),
+				filter:     filter,
+				namespace:  item["namespace"].(string),
+			})
+		}
+		return
+	}
+
+	for _, p := range jsPlugins.([]interface{}) {
+		p := p.(map[string]interface{})
+		pluginName := p["name"].(string)
+
+		if callbacks, err := filteredCallbacks(pluginName, "onResolve", p["onResolve"].([]interface{})); err != nil {
+			return nil, err
+		} else {
+			onResolveCallbacks = append(onResolveCallbacks, callbacks...)
+		}
+
+		if callbacks, err := filteredCallbacks(pluginName, "onLoad", p["onLoad"].([]interface{})); err != nil {
+			return nil, err
+		} else {
+			onLoadCallbacks = append(onLoadCallbacks, callbacks...)
+		}
+	}
+
+	// We want to minimize the amount of IPC traffic. Instead of adding one Go
+	// plugin for every JavaScript plugin, we just add a single Go plugin that
+	// proxies the plugin queries to the list of JavaScript plugins in the host.
+	goPlugins = append(goPlugins, api.Plugin{
+		Name: "JavaScript plugins",
+		Setup: func(build api.PluginBuild) {
+			build.OnResolve(api.OnResolveOptions{Filter: ".*"}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				var ids []interface{}
+				applyPath := logger.Path{Text: args.Path, Namespace: args.Namespace}
+				for _, item := range onResolveCallbacks {
+					if config.PluginAppliesToPath(applyPath, item.filter, item.namespace) {
+						ids = append(ids, item.id)
+					}
+				}
+
+				result := api.OnResolveResult{}
+				if len(ids) == 0 {
+					return result, nil
+				}
+
+				response := service.sendRequest(map[string]interface{}{
+					"command":    "resolve",
+					"key":        key,
+					"ids":        ids,
+					"path":       args.Path,
+					"importer":   args.Importer,
+					"namespace":  args.Namespace,
+					"resolveDir": args.ResolveDir,
+					"pluginData": args.PluginData,
+				}).(map[string]interface{})
+
+				if value, ok := response["id"]; ok {
+					id := value.(int)
+					for _, item := range onResolveCallbacks {
+						if item.id == id {
+							result.PluginName = item.pluginName
+							break
+						}
+					}
+				}
+				if value, ok := response["error"]; ok {
+					return result, errors.New(value.(string))
+				}
+				if value, ok := response["pluginName"]; ok {
+					result.PluginName = value.(string)
+				}
+				if value, ok := response["path"]; ok {
+					result.Path = value.(string)
+				}
+				if value, ok := response["namespace"]; ok {
+					result.Namespace = value.(string)
+				}
+				if value, ok := response["external"]; ok {
+					result.External = value.(bool)
+				}
+				if value, ok := response["pluginData"]; ok {
+					result.PluginData = value.(int)
+				}
+				if value, ok := response["errors"]; ok {
+					result.Errors = decodeMessages(value.([]interface{}))
+				}
+				if value, ok := response["warnings"]; ok {
+					result.Warnings = decodeMessages(value.([]interface{}))
+				}
+
+				return result, nil
+			})
+
+			build.OnLoad(api.OnLoadOptions{Filter: ".*"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				var ids []interface{}
+				applyPath := logger.Path{Text: args.Path, Namespace: args.Namespace}
+				for _, item := range onLoadCallbacks {
+					if config.PluginAppliesToPath(applyPath, item.filter, item.namespace) {
+						ids = append(ids, item.id)
+					}
+				}
+
+				result := api.OnLoadResult{}
+				if len(ids) == 0 {
+					return result, nil
+				}
+
+				response := service.sendRequest(map[string]interface{}{
+					"command":    "load",
+					"key":        key,
+					"ids":        ids,
+					"path":       args.Path,
+					"namespace":  args.Namespace,
+					"pluginData": args.PluginData,
+				}).(map[string]interface{})
+
+				if value, ok := response["id"]; ok {
+					id := value.(int)
+					for _, item := range onLoadCallbacks {
+						if item.id == id {
+							result.PluginName = item.pluginName
+							break
+						}
+					}
+				}
+				if value, ok := response["error"]; ok {
+					return result, errors.New(value.(string))
+				}
+				if value, ok := response["pluginName"]; ok {
+					result.PluginName = value.(string)
+				}
+				if value, ok := response["contents"]; ok {
+					contents := string(value.([]byte))
+					result.Contents = &contents
+				}
+				if value, ok := response["resolveDir"]; ok {
+					result.ResolveDir = value.(string)
+				}
+				if value, ok := response["pluginData"]; ok {
+					result.PluginData = value.(int)
+				}
+				if value, ok := response["errors"]; ok {
+					result.Errors = decodeMessages(value.([]interface{}))
+				}
+				if value, ok := response["warnings"]; ok {
+					result.Warnings = decodeMessages(value.([]interface{}))
+				}
+				if value, ok := response["loader"]; ok {
+					loader, err := cli_helpers.ParseLoader(value.(string))
+					if err != nil {
+						return api.OnLoadResult{}, err
+					}
+					result.Loader = loader
+				}
+
+				return result, nil
+			})
+		},
+	})
+
+	return goPlugins, nil
 }
 
 func (service *serviceType) handleTransformRequest(id uint32, request map[string]interface{}) []byte {

@@ -26,7 +26,7 @@ export const transformSync: typeof types.transformSync = () => {
   throw new Error(`The "transformSync" API only works in node`);
 };
 
-export const startService: typeof types.startService = common.referenceCountedService(() => '', async (options) => {
+export const startService: typeof types.startService = common.longLivedService(() => '', async (options) => {
   if (!options) throw new Error('Must provide an options object to "startService"');
   options = common.validateServiceOptions(options)!;
   let wasmURL = options.wasmURL;
@@ -40,7 +40,8 @@ export const startService: typeof types.startService = common.referenceCountedSe
     `let global={};` +
     `for(let o=self;o;o=Object.getPrototypeOf(o))` +
     `for(let k of Object.getOwnPropertyNames(o))` +
-    `global[k]=self[k];` +
+    `if(!(k in global))` +
+    `Object.defineProperty(global,k,{get:()=>self[k]});` +
     WEB_WORKER_SOURCE_CODE +
     `}`
   let worker: {
@@ -79,12 +80,12 @@ export const startService: typeof types.startService = common.referenceCountedSe
   return {
     build: (options: types.BuildOptions): Promise<any> =>
       new Promise<types.BuildResult>((resolve, reject) =>
-        service.buildOrServe('build', null, options, false, (err, res) =>
+        service.buildOrServe('build', null, null, options, false, '/', (err, res) =>
           err ? reject(err) : resolve(res as types.BuildResult))),
     transform: (input, options) => {
       input += '';
       return new Promise((resolve, reject) =>
-        service.transform('transform', input, options || {}, false, {
+        service.transform('transform', null, input, options || {}, false, {
           readFile(_, callback) { callback(new Error('Internal error'), null); },
           writeFile(_, callback) { callback(null); },
         }, (err, res) => err ? reject(err) : resolve(res!)))
@@ -99,6 +100,7 @@ export const startService: typeof types.startService = common.referenceCountedSe
       throw new Error(`The "transformSync" API only works in node`);
     },
     stop() {
+      // Note: This is now never called
       worker.terminate()
       afterClose()
     },

@@ -152,7 +152,7 @@ type parseResult struct {
 	resolveResults []*resolver.ResolveResult
 }
 
-func insertTranslationsImport(path string, contents string, replaced string, translationsCache *cache.TranslationsCache) string {
+func insertTranslationsImport(assetsBaseUrl string, path string, contents string, replaced string, translationsCache *cache.TranslationsCache) string {
 	var dir = filepath.Dir(path)
 	var aPath = dir
 	for {
@@ -168,16 +168,16 @@ func insertTranslationsImport(path string, contents string, replaced string, tra
 	}
 
 	var translationsFile = filepath.Join(aPath, "translations", "en.json")
-	var fetchFnStr = `async (e) => { const n = await fetch('https://web-cdn.myshopify.io/webpack/assets/` + filepath.Join(aPath, "translations") + `/' + e + '.json'); return n.json(); }`
+	var fetchFnStr = `async (e) => { const n = await fetch('` + assetsBaseUrl + filepath.Join(aPath, "translations") + `/' + e + '.json'); return n.json(); }`
 	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations: " + fetchFnStr + "})", 1)
 	return "import _en from '" + translationsFile + "';\n" + newContents
 }
 
-func translationsHack(path string, contents string, translationsCache *cache.TranslationsCache) string {
+func translationsHack(assetsBaseUrl string, path string, contents string, translationsCache *cache.TranslationsCache) string {
 	if strings.Contains(contents, "useI18n()") {
-		return insertTranslationsImport(path, contents, "useI18n", translationsCache)
+		return insertTranslationsImport(assetsBaseUrl, path, contents, "useI18n", translationsCache)
 	} else if strings.Contains(contents, "withI18n()") {
-		return insertTranslationsImport(path, contents, "withI18n", translationsCache)
+		return insertTranslationsImport(assetsBaseUrl, path, contents, "withI18n", translationsCache)
 	}
 	return contents
 }
@@ -252,7 +252,7 @@ func parseFile(args parseArgs) {
 
 	switch loader {
 	case config.LoaderJS:
-		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
 
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
@@ -261,7 +261,7 @@ func parseFile(args parseArgs) {
 	case config.LoaderJSX:
 		args.options.JSX.Parse = true
 
-		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
 
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
@@ -270,7 +270,7 @@ func parseFile(args parseArgs) {
 	case config.LoaderTS:
 		args.options.TS.Parse = true
 
-		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
 
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}
@@ -280,7 +280,7 @@ func parseFile(args parseArgs) {
 		args.options.TS.Parse = true
 		args.options.JSX.Parse = true
 
-		source.Contents = translationsHack(source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
 
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}

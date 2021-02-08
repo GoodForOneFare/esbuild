@@ -191,6 +191,7 @@ function flagsForBuildOptions(
   let write = getFlag(options, keys, 'write', mustBeBoolean) ?? writeDefault; // Default to true if not specified
   let incremental = getFlag(options, keys, 'incremental', mustBeBoolean) === true;
   let plugins = getFlag(options, keys, 'plugins', mustBeArray);
+  let spinxAssetBaseUrl = getFlag(options, keys, 'spinxAssetBaseUrl', mustBeString);
   checkForInvalidFlags(options, keys, `in ${callName}() call`);
 
   if (sourcemap) flags.push(`--sourcemap${sourcemap === true ? '' : `=${sourcemap}`}`);
@@ -206,6 +207,7 @@ function flagsForBuildOptions(
       watchMode = { onRebuild };
     }
   }
+  if (spinxAssetBaseUrl) flags.push(`--spinx-asset-base-url=${spinxAssetBaseUrl}`);
   if (splitting) flags.push('--splitting');
   if (metafile) flags.push(`--metafile=${metafile}`);
   if (outfile) flags.push(`--outfile=${outfile}`);

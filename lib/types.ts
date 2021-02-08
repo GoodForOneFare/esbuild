@@ -57,6 +57,7 @@ export interface BuildOptions extends CommonOptions {
   plugins?: Plugin[];
   absWorkingDir?: string;
   watch?: boolean | WatchMode;
+  spinxAssetBaseUrl: string;
 }
 
 export interface WatchMode {

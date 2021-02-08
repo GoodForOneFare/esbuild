@@ -168,7 +168,8 @@ func insertTranslationsImport(path string, contents string, replaced string, tra
 	}
 
 	var translationsFile = filepath.Join(aPath, "translations", "en.json")
-	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations(e) { const n = await fetch('https://web-cdn.myshopify.io/webpack/assets/" + path + "'); return n.json(); }})", 1)
+	var fetchFnStr = `async (e) => { const n = await fetch('https://web-cdn.myshopify.io/webpack/assets/` + filepath.Join(aPath, "translations") + `/' + e + '.json'); return n.json(); }`
+	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations: " + fetchFnStr + "})", 1)
 	return "import _en from '" + translationsFile + "';\n" + newContents
 }
 

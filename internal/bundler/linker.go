@@ -1590,6 +1590,7 @@ func (c *linkerContext) createExportsForFile(sourceIndex uint32) {
 			}
 		}
 
+		// @@This is interesting - adding export statements.
 		// Add a getter property
 		var getter js_ast.Expr
 		body := js_ast.FnBody{Stmts: []js_ast.Stmt{{Loc: value.Loc, Data: &js_ast.SReturn{Value: &value}}}}
@@ -2686,6 +2687,7 @@ func (c *linkerContext) computeChunks() []chunkInfo {
 			switch repr.(type) {
 			case *chunkReprJS:
 				baseName += c.options.OutputExtensionJS
+				// print("@@entry " + baseName)
 			case *chunkReprCSS:
 				baseName += c.options.OutputExtensionCSS
 			}
@@ -2693,7 +2695,7 @@ func (c *linkerContext) computeChunks() []chunkInfo {
 
 		// Always use cross-platform path separators to avoid problems with Windows
 		file.entryPointRelPath = path.Join(relDir, baseName)
-
+		// print("@@entry2 " + file.entryPointRelPath)
 		// Create a chunk for the entry point here to ensure that the chunk is
 		// always generated even if the resulting file is empty
 		entryBits := newBitSet(uint(len(c.entryPoints)))
@@ -3318,6 +3320,7 @@ func (c *linkerContext) generateCodeForFileInChunkJS(
 		// "__commonJS((exports, module) => { ... })"
 		var value js_ast.Expr
 		if c.options.UnsupportedJSFeatures.Has(compat.Arrow) {
+			// This is interesting - constructing commonJS wrapper, with example text above.
 			value = js_ast.Expr{Data: &js_ast.ECall{
 				Target: js_ast.Expr{Data: &js_ast.EIdentifier{Ref: commonJSRef}},
 				Args:   []js_ast.Expr{{Data: &js_ast.EFunction{Fn: js_ast.Fn{Args: args, Body: js_ast.FnBody{Stmts: stmts}}}}},
@@ -3337,6 +3340,23 @@ func (c *linkerContext) generateCodeForFileInChunkJS(
 			}},
 		}})
 	}
+
+	// js_ast.Stmt{Data: &js_ast.SExpr{Value: js_ast.Expr{Data: &js_ast.ECall{
+	// 	Target: js_ast.Expr{Data: &js_ast.EIdentifier{Ref: repr.ast.WrapperRef}},
+	// }}}}
+
+	// js_ast.Expr{Loc: loc, Data: &js_ast.ECall{
+	// 	Target:                 result,
+	// 	Args:                   e.Args,
+	// 	IsDirectEval:           e.IsDirectEval,
+	// 	CanBeUnwrappedIfUnused: e.CanBeUnwrappedIfUnused,
+	// }}
+	// stmts = append(stmts, js_ast.Stmt{Data: &js_ast.SLocal{
+	// 	Decls: []js_ast.Decl{{
+	// 		Binding: js_ast.Binding{Data: &js_ast.BIdentifier{Ref: repr.ast.WrapperRef}},
+	// 		Value:   &value,
+	// 	}},
+	// }})
 
 	// Only generate a source map if needed
 	var addSourceMappings bool
@@ -4127,6 +4147,7 @@ func (repr *chunkReprCSS) generate(c *linkerContext, chunk *chunkInfo) func(gene
 		}
 		isFirstMeta := true
 
+		// @@This is interesting - CSS printing to file + add to metadata.
 		// Concatenate the generated CSS chunks together
 		for _, compileResult := range compileResults {
 			if c.options.Mode == config.ModeBundle && !c.options.RemoveWhitespace {

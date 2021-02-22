@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -169,7 +170,7 @@ func insertTranslationsImport(assetsBaseUrl string, path string, contents string
 
 	var translationsFile = filepath.Join(aPath, "translations", "en.json")
 	var fetchFnStr = `async (e) => { const n = await fetch('` + assetsBaseUrl + filepath.Join(aPath, "translations") + `/' + e + '.json'); return n.json(); }`
-	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations: " + fetchFnStr + "})", 1)
+	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations: "+fetchFnStr+"})", 1)
 	return "import _en from '" + translationsFile + "';\n" + newContents
 }
 
@@ -190,6 +191,7 @@ func parseFile(args parseArgs) {
 		IdentifierName: js_ast.GenerateNonUniqueNameFromPath(args.keyPath.Text),
 	}
 
+	// print("@@parseFile: " + args.prettyPath + "\n")
 	var loader config.Loader
 	var absResolveDir string
 	var pluginName string
@@ -238,6 +240,7 @@ func parseFile(args parseArgs) {
 		loader = loaderFromFileExtension(args.options.ExtensionToLoader, base+ext)
 	}
 
+	// @@ just after loaders are done.
 	result := parseResult{
 		file: file{
 			source:     source,
@@ -281,8 +284,103 @@ func parseFile(args parseArgs) {
 		args.options.JSX.Parse = true
 
 		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+		if args.options.Platform == config.PlatformBrowser {
+			segments := strings.Split(source.PrettyPath, "/")
+			componentName := strings.Replace(segments[len(segments)-1], ".tsx", "", 1)
+			matched, err := regexp.MatchString(`^[a-zA-Z0-9]+$`, componentName)
+			println(fmt.Sprintf("@@"+source.PrettyPath+": "+componentName+": %s _ %s", matched, err))
+			if matched {
+				hash := "1"
+				source.Contents = fmt.Sprintf(`
+					import.meta.url = '%s';
+					import.meta.hot = window.__SPINX_HMR__.createHotContext(import.meta.url);
+					
+					let prevRefreshReg = window.$RefreshReg$;
+					let prevRefreshSig = window.$RefreshSig$
+					
+					window.$RefreshReg$ = (type, id) => {				
+						window.$RefreshRuntime$.register(
+							type,
+							'%s' + ' ' + id,
+						);
+					};
+					
+					window.$RefreshSig$ = window.$RefreshRuntime$.createSignatureFunctionForTransform;
+					
+					const _s = window.$RefreshSig$();		
+					`, source.PrettyPath, source.PrettyPath) + source.Contents + fmt.Sprintf(`
+						if (typeof %s != 'undefined') {
+							_s(%s, '%s=%s', false, function () {
+								return []; // dependencies?
+							});
+								
+							$RefreshReg$(%s, '%s');
+								
+							window.$RefreshReg$ = prevRefreshReg;
+							window.$RefreshSig$ = prevRefreshSig;
+							import.meta.hot.accept(() => {
+								window.$RefreshRuntime$.performReactRefresh();
+							});					
+						}
+				`, componentName, componentName, componentName, hash, componentName, componentName)
 
+				// if source.PrettyPath == "app/components/ContextualContentCarousel/components/ContextualMediaCard/components/ContextualTextThumbnail/ContextualTextThumbnail.tsx" {
+				// 	println("@@SOURCE: " + source.Contents)
+				// }
+				if source.PrettyPath == "app/sections/Inventory/Movements/PurchaseOrders/PurchaseOrderDetails/hooks/use-export-pdf-action/use-export-pdf-action.tsx" ||
+					source.PrettyPath == "app/utilities/channel-picker/with-channels.tsx" ||
+					source.PrettyPath == "packages/@shopify/apollo-workarounds/with-graphql.tsx" ||
+					source.PrettyPath == "packages/@web-utilities/loading/with-loading.tsx" {
+					println("@@SOURCE: " + source.Contents)
+				}
+			}
+		}
+		// if args.options.Platform == config.PlatformBrowser && strings.Contains(source.Contents, "import React from") {
+		// 	// source.Contents = `
+		// 	// var prevRefreshReg = window.$RefreshReg$;
+		// 	// var prevRefreshSig = window.$RefreshSig$;
+		// 	// import RefreshRuntime from 'react-refresh/runtime';
+
+		// 	// 	window.$RefreshReg$ = (type, id) => {
+		// 	// 		// Note module.id is webpack-specific, this may vary in other bundlers
+		// 	// 		const fullId = module.id + ' ' + id;
+		// 	// 		RefreshRuntime.register(type, fullId);
+		// 	// 	}
+		// 	// 	window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+		// 	// ` + source.Contents +
+		// 	// 	`  window.$RefreshReg$ = prevRefreshReg;
+		// 	// window.$RefreshSig$ = prevRefreshSig;
+		// 	// `
+
+		// 	source.Contents = `
+		// 	const narf = window;
+		// 	var prevRefreshReg = narf.$RefreshReg$;
+		// 	var prevRefreshSig = narf.$RefreshSig$;
+
+		// 	import RefreshRuntime from 'react-refresh/runtime';
+		// 	narf.$RefreshReg$ = (type, id) => {
+		// 		// Note module.id is webpack-specific, this may vary in other bundlers
+		// 		const fullId = module.id + ' lol ' + id;
+		// 		RefreshRuntime.register(type, fullId);
+		// 	}
+
+		// 	narf.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+		// 	console.log('hello', narf);
+		// 	` + source.Contents
+		// }
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
+
+		// var buffer = fmt.Sprintf("%s %d\n", args.prettyPath, len(ast.NamedImports))
+		// if len(ast.NamedImports) > 0 {
+		// 	// namedImports := make(map[js_ast.Ref]ast.NamedImport, len(ast.NamedImports))
+		// 	for k, v := range ast.NamedImports {
+		// 		var sym = ast.Symbols.Get(k)
+		// 		buffer = buffer + fmt.Sprintf("  %s:%s %s %v\n", k.InnerIndex, k.OuterIndex, v.Alias, sym)
+		// 	}
+		// 	println(buffer)
+		// 	// repr.ast.NamedImports = namedImports
+		// }
+
 		result.file.repr = &reprJS{ast: ast}
 		result.ok = ok
 
@@ -896,6 +994,7 @@ func ScanBundle(log logger.Log, fs fs.FS, res resolver.Resolver, caches *cache.C
 		resultChannel: make(chan parseResult),
 	}
 
+	// @@ process file loop.
 	// Always start by parsing the runtime file
 	s.results = append(s.results, parseResult{})
 	s.remaining++
@@ -955,6 +1054,7 @@ func (s *scanner) maybeParseFile(
 		optionsClone.Stdin = nil
 	}
 
+	// @@ is file in node_modules check
 	// Don't emit warnings for code inside a "node_modules" directory
 	if resolver.IsInsideNodeModules(s.fs, path.Text) {
 		optionsClone.SuppressWarningsAboutWeirdCode = true
@@ -1055,6 +1155,7 @@ func (s *scanner) preprocessInjectedFiles() {
 			IsDefine:    true,
 		})
 
+		// @@interesting - injected define expression creation
 		// Generate the file inline here since it has already been parsed
 		expr := js_ast.Expr{Data: define.Data}
 		ast := js_parser.LazyExportAST(s.log, source, js_parser.OptionsFromConfig(&s.options), expr, "")
@@ -1090,6 +1191,7 @@ func (s *scanner) preprocessInjectedFiles() {
 			continue
 		}
 
+		// @@interesting - parsing injected file
 		i := len(injectedFiles)
 		injectedFiles = append(injectedFiles, config.InjectedFile{})
 		channel := make(chan config.InjectedFile)

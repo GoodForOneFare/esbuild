@@ -1,6 +1,7 @@
 package js_parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -975,7 +976,9 @@ func (p *parser) discardScopesUpTo(scopeIndex int) {
 }
 
 func (p *parser) newSymbol(kind js_ast.SymbolKind, name string) js_ast.Ref {
+	// println("@@newSymbol " + name)
 	ref := js_ast.Ref{OuterIndex: p.source.Index, InnerIndex: uint32(len(p.symbols))}
+	// println(fmt.Sprintf("@@newSymbol 2 - %+v", ref))
 	p.symbols = append(p.symbols, js_ast.Symbol{
 		Kind:         kind,
 		OriginalName: name,
@@ -2478,6 +2481,7 @@ func (p *parser) parsePrefix(level js_ast.L, errors *deferredErrors, flags exprF
 
 		// Handle the start of an arrow expression
 		if p.lexer.Token == js_lexer.TEqualsGreaterThan {
+			//@@ create name in ref!  This is where "window" gets created when parsing `window.$$Refresh$$`.
 			ref := p.storeNameInRef(name)
 			arg := js_ast.Arg{Binding: js_ast.Binding{Loc: loc, Data: &js_ast.BIdentifier{Ref: ref}}}
 
@@ -11967,6 +11971,9 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 		}
 	}
 
+	// println(fmt.Sprintf("%v", reflect.TypeOf(stmts[0].Data)))
+	// stmts = append(append(make([]js_ast.Stmt, 0, len(stmts)+1), lol), stmts...)
+
 	// Insert a variable for "import.meta" at the top of the file if it was used.
 	// We don't need to worry about "use strict" directives because this only
 	// happens when bundling, in which case we are flatting the module scopes of
@@ -11979,6 +11986,7 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 				Value:   &js_ast.Expr{Data: &js_ast.EObject{}},
 			}},
 		}}
+		// @@This is interesting
 		stmts = append(append(make([]js_ast.Stmt, 0, len(stmts)+1), importMetaStmt), stmts...)
 	}
 
@@ -11986,6 +11994,30 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 	var parts []js_ast.Part
 	var after []js_ast.Part
 
+	// var refreshPreludeSource = logger.Source{
+	// 	Index:          0,
+	// 	KeyPath:        logger.Path{Text: "<reactRefreshPrelude>"},
+	// 	PrettyPath:     "<reactRefreshPrelude>",
+	// 	IdentifierName: "reactRefreshPrelude",
+	// 	Contents:       `console.log("hello");`,
+	// }
+
+	// if source.PrettyPath != "<reactRefreshPrelude>" {
+	// 	runtimeAST, _ := Parse(log, refreshPreludeSource, OptionsFromConfig(&config.Options{
+	// 		// These configuration options must only depend on the key
+	// 		MangleSyntax:      false,
+	// 		MinifyIdentifiers: false,
+	// 		Platform:          config.PlatformBrowser,
+	// 		// Defines:           key.Platform,
+	// 		// UnsupportedJSFeatures: [],
+	// 		// Always do tree shaking for the runtime because we never want to
+	// 		// include unnecessary runtime code
+	// 		Mode: config.ModeBundle,
+	// 	}))
+
+	// 	parts = p.appendPart(parts, runtimeAST.Parts[0].Stmts)
+	// }
+	// @@this is interesting - injectedFiles being inserted into ASTs
 	// Insert any injected import statements now that symbols have been declared
 	for _, file := range p.options.injectedFiles {
 		exportsNoConflict := make([]string, 0, len(file.Exports))
@@ -12008,6 +12040,56 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 		}
 		before = p.generateImportStmt(file.Path, exportsNoConflict, file.SourceIndex, before, symbols)
 	}
+	// bytes4, _ := json.MarshalIndent(p.tempRefsToDeclare, "\t", "\t")
+	// fmt.Println("@@tempRefsToDeclare: " + string(bytes4))
+
+	// println(fmt.Sprintf("boo %s, %+v, %+v", source.PrettyPath, options.jsx.Parse, options.mode))
+	// println(fmt.Sprintf("@@!! %+v", p.symbols[2]))
+
+	// bytes, _ := json.MarshalIndent(stmts, "\t", "\t")
+	// fmt.Println(string(bytes))
+
+	// bytes2, _ := json.MarshalIndent(p.symbols, "\t", "\t")
+	// fmt.Println(string(bytes2))
+
+	// for _, symb := range p.symbols {
+	// 	println(fmt.Sprintf("@@ symbol - %+v", symb))
+	// }
+
+	// for _, symb := range p.declaredSymbols {
+	// 	println(fmt.Sprintf("@@ declared symbol - %+v", symb))
+	// }
+
+	// for _, symb := range p.allocatedNames {
+	// 	println(fmt.Sprintf("@@ allocated name - %+v", symb))
+	// }
+
+	// for _, symb := range p.relocatedTopLevelVars {
+	// 	println(fmt.Sprintf("@@ relocated top level vars - %+v", symb))
+	// }
+
+	// for _, moduleScopeMember := range p.moduleScope.Members {
+	// 	println(fmt.Sprintf("@@ module scope member - %+v", moduleScopeMember))
+	// 	println(fmt.Sprintf("  @@ symbol lookup: %+v - %+v",
+	// 		reflect.TypeOf(moduleScopeMember),
+	// 		p.symbols[int(moduleScopeMember.Ref.InnerIndex)]))
+	// 	println(fmt.Sprintf("  @@toplevel %+v", p.topLevelSymbolToParts[moduleScopeMember.Ref]))
+	// }
+
+	// parts = p.appendPart(parts, []js_ast.Stmt{{Loc: stmt.Loc, Data: &clone}})
+	// parts = p.appendPart(parts, []js_ast.Stmt{{Loc: logger.Loc{}, Data: &js_ast.SDebugger{}}})
+
+	// ref := p.storeNameInRef("window")
+	// parts = p.appendPart(parts, []js_ast.Stmt{
+	// 	{
+	// 		Loc: logger.Loc{},
+	// 		Data: &js_ast.SDebugger{}
+	// 	}
+	// })
+	// p.declareCommonJSSymbol(js_ast.SymbolHoisted, "module")
+	// p.newSymbol(js_ast.SymbolHoisted, "module")
+
+	// println(fmt.Sprintf("XXX %+v", p.symbols[2]))
 
 	// Bind symbols in a second pass over the AST. I started off doing this in a
 	// single pass, but it turns out it's pretty much impossible to do this
@@ -12017,6 +12099,7 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 		// When not bundling, everything comes in a single part
 		parts = p.appendPart(parts, stmts)
 	} else {
+		// @@ this seems like a place where we know: if react is an import && new statements can be prepended/appended.
 		// When bundling, each top-level statement is potentially a separate part
 		for _, stmt := range stmts {
 			switch s := stmt.Data.(type) {
@@ -12046,13 +12129,215 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 		}
 	}
 
+	for _, stmt := range stmts {
+		println(fmt.Sprintf("%+v", reflect.TypeOf(stmt.Data)))
+		switch s := stmt.Data.(type) {
+		case *js_ast.SFunction:
+			println(fmt.Sprintf("YO %+v", s.Fn.Name.Ref))
+			for key, value := range p.moduleScope.Members {
+				if value.Ref == s.Fn.Name.Ref {
+					println(fmt.Sprintf("YO found %+v %s", s, key))
+				}
+			}
+
+		case *js_ast.SExpr:
+			bytes, _ := json.MarshalIndent(s, "\t", "\t")
+			fmt.Println(string(bytes))
+
+			println(fmt.Sprintf("  sexpr stmt.Data type: %+v", reflect.TypeOf(stmt.Data)))
+			println(fmt.Sprintf("  sexpr value.Data type: %+v", reflect.TypeOf(s.Value.Data)))
+
+			switch t := s.Value.Data.(type) {
+			case *js_ast.ECall:
+				println(fmt.Sprintf("    ecall target: %+v", t.Target))
+				println(fmt.Sprintf("    ecall target type: %+v", reflect.TypeOf(t.Target)))
+				println(fmt.Sprintf("    ecall args type: %+v", reflect.TypeOf(t.Args)))
+				println(fmt.Sprintf("    ecall target data type: %+v", reflect.TypeOf(t.Target.Data)))
+
+				switch u := t.Target.Data.(type) {
+				case *js_ast.EDot:
+					println(fmt.Sprintf("    edot target data type: %+v", reflect.TypeOf(u.Target.Data)))
+
+					switch v := u.Target.Data.(type) {
+					case *js_ast.EIdentifier:
+						println(fmt.Sprintf("    edot target data ref: %+v", v.Ref))
+						println(fmt.Sprintf("    edot name: %+v", u.Name))
+					}
+				}
+			}
+
+			println(fmt.Sprintf("  %+v", stmt.Loc.Start))
+			println()
+		}
+	}
+
+	bytes5, _ := json.MarshalIndent(stmts, "\t", "\t")
+	fmt.Println(string(bytes5))
+
+	bytes2, _ := json.MarshalIndent(p.allocatedNames, "\t", "\t")
+	fmt.Println("@@allocatedNames: " + string(bytes2))
+
+	println("@@@@@")
+	bytes3, _ := json.MarshalIndent(p.moduleScope.Members, "\t", "\t")
+	fmt.Println("@@moduleScope.Members: " + string(bytes3))
+	println("@@@@@")
+
 	// Pop the module scope to apply the "ContainsDirectEval" rules
 	p.popScope()
 
+	println("!!!!")
+	for _, s3 := range stmts {
+		printTreeTypes(s3, 0)
+	}
+	println("!!!!")
 	parts = append(append(before, parts...), after...)
 	result = p.toAST(source, parts, hashbang, directive)
 	result.SourceMapComment = p.lexer.SourceMappingURL
 	return
+}
+
+func PadLeft(length int) string {
+	str := ""
+	for {
+		str = str + " "
+		if len(str) > length {
+			return str[0:length]
+		}
+	}
+}
+
+func printTreeTypesE(expr js_ast.E, indent int) {
+	indentStr := PadLeft(indent)
+
+	println(indentStr + fmt.Sprintf("%+v", reflect.TypeOf(expr)))
+	switch e := expr.(type) {
+	case *js_ast.EBinary:
+		printTreeTypes(e.Left.Data)
+		println(indentStr + fmt.Sprintf("Op: %+v", e.Op))
+		printTreeTypes(e.Right.Data)
+	}
+
+	// func (*EArray) isExpr()             {}
+	// func (*EUnary) isExpr()             {}
+	// func (*EBinary) isExpr()            {}
+	// func (*EBoolean) isExpr()           {}
+	// func (*ESuper) isExpr()             {}
+	// func (*ENull) isExpr()              {}
+	// func (*EUndefined) isExpr()         {}
+	// func (*EThis) isExpr()              {}
+	// func (*ENew) isExpr()               {}
+	// func (*ENewTarget) isExpr()         {}
+	// func (*EImportMeta) isExpr()        {}
+	// func (*ECall) isExpr()              {}
+	// func (*EDot) isExpr()               {}
+	// func (*EIndex) isExpr()             {}
+	// func (*EArrow) isExpr()             {}
+	// func (*EFunction) isExpr()          {}
+	// func (*EClass) isExpr()             {}
+	// func (*EIdentifier) isExpr()        {}
+	// func (*EImportIdentifier) isExpr()  {}
+	// func (*EPrivateIdentifier) isExpr() {}
+	// func (*EJSXElement) isExpr()        {}
+	// func (*EMissing) isExpr()           {}
+	// func (*ENumber) isExpr()            {}
+	// func (*EBigInt) isExpr()            {}
+	// func (*EObject) isExpr()            {}
+	// func (*ESpread) isExpr()            {}
+	// func (*EString) isExpr()            {}
+	// func (*ETemplate) isExpr()          {}
+	// func (*ERegExp) isExpr()            {}
+	// func (*EAwait) isExpr()             {}
+	// func (*EYield) isExpr()             {}
+	// func (*EIf) isExpr()                {}
+	// func (*ERequire) isExpr()           {}
+	// func (*ERequireResolve) isExpr()    {}
+	// func (*EImport) isExpr()            {}
+
+}
+
+func printTreeTypesS(stmt js_ast.S, indent int) {
+	indentStr := PadLeft(indent)
+
+	println(indentStr + fmt.Sprintf("%+v", reflect.TypeOf(stmt)))
+
+	switch s := stmt.(type) {
+	case *js_ast.SBlock:
+		for _, s := range s.Stmts {
+			printTreeTypes(s, indent+1)
+		}
+	// case *js_ast.SComment:
+	// case *js_ast.SDebugger:
+	// case *js_ast.SDirective:
+	// case *js_ast.SEmpty:
+	// case *js_ast.STypeScript:
+	// case *js_ast.SExportClause:
+	// case *js_ast.SExportFrom:
+	// case *js_ast.SExportDefault:
+	// case *js_ast.SExportStar:
+	// case *js_ast.SExportEquals:
+	// case *js_ast.SLazyExport:
+	case *js_ast.SExpr:
+		printTreeTypesE(s.Value.Data, indent+1)
+
+		// case *js_ast.SEnum:
+		// case *js_ast.SNamespace:
+		// case *js_ast.SFunction:
+		// case *js_ast.SClass:
+		// case *js_ast.SLabel:
+		// case *js_ast.SIf:
+		// case *js_ast.SFor:
+		// case *js_ast.SForIn:
+		// case *js_ast.SForOf:
+		// case *js_ast.SDoWhile:
+		// case *js_ast.SWhile:
+		// case *js_ast.SWith:
+		// case *js_ast.STry:
+		// case *js_ast.SSwitch:
+		// case *js_ast.SImport:
+		// case *js_ast.SReturn:
+		// case *js_ast.SThrow:
+		// case *js_ast.SLocal:
+		// case *js_ast.SBreak:
+		// case *js_ast.SContinue:
+
+	}
+}
+
+func printTreeTypes(stmt js_ast.Stmt, indent int) {
+	indentStr := PadLeft(indent)
+
+	println(indentStr + fmt.Sprintf("%+v", reflect.TypeOf(stmt)))
+
+	switch s := stmt.Data.(type) {
+	case *js_ast.SFunction:
+		printTreeTypesS(s, indent+1)
+
+	case *js_ast.SExpr:
+		printTreeTypesS(s, indent+1)
+		// bytes, _ := json.MarshalIndent(s, "\t", "\t")
+		// fmt.Println(string(bytes))
+
+		// println(fmt.Sprintf("  sexpr stmt.Data type: %+v", reflect.TypeOf(stmt.Data)))
+		// println(fmt.Sprintf("  sexpr value.Data type: %+v", reflect.TypeOf(s.Value.Data)))
+
+		// switch t := s.Value.Data.(type) {
+		// case *js_ast.ECall:
+		// 	println(fmt.Sprintf("    ecall target: %+v", t.Target))
+		// 	println(fmt.Sprintf("    ecall target type: %+v", reflect.TypeOf(t.Target)))
+		// 	println(fmt.Sprintf("    ecall args type: %+v", reflect.TypeOf(t.Args)))
+		// 	println(fmt.Sprintf("    ecall target data type: %+v", reflect.TypeOf(t.Target.Data)))
+
+		// 	switch u := t.Target.Data.(type) {
+		// 	case *js_ast.EDot:
+		// 		println(fmt.Sprintf("    edot target data type: %+v", reflect.TypeOf(u.Target.Data)))
+
+		// 		switch v := u.Target.Data.(type) {
+		// 		case *js_ast.EIdentifier:
+		// 			println(fmt.Sprintf("    edot target data ref: %+v", v.Ref))
+		// 			println(fmt.Sprintf("    edot name: %+v", u.Name))
+		// 		}
+		// 	}
+	}
 }
 
 func LazyExportAST(log logger.Log, source logger.Source, options Options, expr js_ast.Expr, apiCall string) js_ast.AST {
@@ -12351,6 +12636,7 @@ func (p *parser) toAST(source logger.Source, parts []js_ast.Part, hashbang strin
 		for partIndex, part := range parts {
 			localDependencies := make(map[uint32]bool)
 			for ref := range part.SymbolUses {
+				// @@HERE
 				for _, otherPart := range p.topLevelSymbolToParts[ref] {
 					localDependencies[otherPart] = true
 				}

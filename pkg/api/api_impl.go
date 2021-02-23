@@ -814,6 +814,7 @@ func rebuildImpl(
 		WatchMode:             buildOpts.Watch != nil,
 		Plugins:               plugins,
 		SpinxAssetBaseURL:     buildOpts.SpinxAssetBaseUrl,
+		SpinxHotReact:         buildOpts.SpinxHotReact,
 	}
 	if options.MainFields != nil {
 		options.MainFields = append([]string{}, options.MainFields...)

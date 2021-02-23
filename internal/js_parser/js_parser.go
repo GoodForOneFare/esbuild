@@ -296,6 +296,7 @@ type optionsThatSupportStructuralEquality struct {
 	preserveUnusedImportsTS        bool
 	useDefineForClassFields        bool
 	suppressWarningsAboutWeirdCode bool
+	spinxHotReact                  bool
 }
 
 func OptionsFromConfig(options *config.Options) Options {
@@ -320,6 +321,7 @@ func OptionsFromConfig(options *config.Options) Options {
 			preserveUnusedImportsTS:        options.PreserveUnusedImportsTS,
 			useDefineForClassFields:        options.UseDefineForClassFields,
 			suppressWarningsAboutWeirdCode: options.SuppressWarningsAboutWeirdCode,
+			spinxHotReact:                  options.SpinxHotReact,
 		},
 	}
 }
@@ -12784,6 +12786,43 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 		}
 	}
 
+	if options.spinxHotReact && options.jsx.Parse {
+		for _, stmt := range stmts {
+			switch s := stmt.Data.(type) {
+			case *js_ast.SFunction:
+				if strings.HasSuffix(source.PrettyPath, ".tsx") {
+					if refreshSignatureFn, ok := p.moduleScope.Members["__spinx_refresh_sig__"]; ok {
+						segments := strings.Split(source.PrettyPath, "/")
+						componentName := strings.Replace(segments[len(segments)-1], ".tsx", "", 1)
+						fnName, ok := findRefNameFromScope(p.moduleScope, s.Fn.Name.Ref)
+						if ok && fnName == componentName {
+							s.Fn.Body.Stmts = append(
+								[]js_ast.Stmt{
+									{
+										Loc: logger.Loc{},
+										Data: &js_ast.SExpr{
+											DoesNotAffectTreeShaking: false,
+											Value: js_ast.Expr{
+												Data: &js_ast.ECall{
+													Target: js_ast.Expr{Data: &js_ast.EIdentifier{Ref: refreshSignatureFn.Ref}},
+													Args:   []js_ast.Expr{},
+													// OptionalChain: false,
+													IsDirectEval:           false,
+													CanBeUnwrappedIfUnused: false,
+												},
+											},
+										},
+									},
+								},
+								s.Fn.Body.Stmts...,
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Pop the module scope to apply the "ContainsDirectEval" rules
 	p.popScope()
 
@@ -12791,6 +12830,23 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 	result = p.toAST(parts, hashbang, directive)
 	result.SourceMapComment = p.lexer.SourceMappingURL
 	return
+}
+
+func findRefNameFromScope(scope *js_ast.Scope, ref js_ast.Ref) (string, bool) {
+	for key, member := range scope.Members {
+		if member.Ref == ref {
+			return key, true
+		}
+	}
+
+	for _, childScope := range scope.Children {
+		foundKey, ok := findRefNameFromScope(childScope, ref)
+		if ok {
+			return foundKey, true
+		}
+	}
+
+	return "", false
 }
 
 func LazyExportAST(log logger.Log, source logger.Source, options Options, expr js_ast.Expr, apiCall string) js_ast.AST {

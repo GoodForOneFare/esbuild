@@ -228,6 +228,7 @@ type Options struct {
 
 	Stdin *StdinInfo
 	SpinxAssetBaseURL string
+	SpinxHotReact     bool
 }
 
 func IsTreeShakingEnabled(mode Mode, outputFormat Format) bool {

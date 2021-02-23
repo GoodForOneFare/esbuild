@@ -195,6 +195,7 @@ function flagsForBuildOptions(
   let incremental = getFlag(options, keys, 'incremental', mustBeBoolean) === true;
   let plugins = getFlag(options, keys, 'plugins', mustBeArray);
   let spinxAssetBaseUrl = getFlag(options, keys, 'spinxAssetBaseUrl', mustBeString);
+  let spinxHotReact = getFlag(options, keys, 'spinxHotReact', mustBeBoolean) ?? false;
   checkForInvalidFlags(options, keys, `in ${callName}() call`);
 
   if (sourcemap) flags.push(`--sourcemap${sourcemap === true ? '' : `=${sourcemap}`}`);
@@ -211,6 +212,7 @@ function flagsForBuildOptions(
     }
   }
   if (spinxAssetBaseUrl) flags.push(`--spinx-asset-base-url=${spinxAssetBaseUrl}`);
+  if (spinxHotReact) flags.push('--spinx-hot-react');
   if (splitting) flags.push('--splitting');
   if (preserveSymlinks) flags.push('--preserve-symlinks');
   if (metafile) flags.push(`--metafile=${metafile}`);

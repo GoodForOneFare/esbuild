@@ -674,6 +674,7 @@ func rebuildImpl(
 		WatchMode:             buildOpts.Watch != nil,
 		Plugins:               plugins,
 		SpinxAssetBaseURL:     buildOpts.SpinxAssetBaseUrl,
+		SpinxHotReact:         buildOpts.SpinxHotReact,
 	}
 	for i, path := range buildOpts.Inject {
 		options.InjectAbsPaths[i] = validatePath(log, realFS, path, "inject path")

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -313,6 +314,46 @@ func parseFile(args parseArgs) {
 		args.options.JSX.Parse = true
 
 		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+		if args.options.SpinxHotReact && args.options.Platform == config.PlatformBrowser {
+			segments := strings.Split(source.PrettyPath, "/")
+			componentName := strings.Replace(segments[len(segments)-1], ".tsx", "", 1)
+			matched, _ := regexp.MatchString(`^[a-zA-Z0-9]+$`, componentName)
+			if matched {
+				hash := "1"
+				source.Contents = fmt.Sprintf(`
+					const __spinx_url__ = '%s';
+					const __spinx_hot__ = window.__SPINX_HMR__.createHotContext(__spinx_url__);
+
+					let prevRefreshReg = window.$RefreshReg$;
+					let prevRefreshSig = window.$RefreshSig$
+
+					window.$RefreshReg$ = (type, id) => {
+						window.$RefreshRuntime$.register(
+							type,
+							'%s' + ' ' + id,
+						);
+					};
+
+					window.$RefreshSig$ = window.$RefreshRuntime$.createSignatureFunctionForTransform;
+
+					const __spinx_refresh_sig__ = window.$RefreshSig$();
+					`, source.PrettyPath, source.PrettyPath) + source.Contents + fmt.Sprintf(`
+						if (typeof %s != 'undefined') {
+							__spinx_refresh_sig__(%s, '%s=%s', false, function () {
+								return []; // dependencies?
+							});
+
+							$RefreshReg$(%s, '%s');
+
+							window.$RefreshReg$ = prevRefreshReg;
+							window.$RefreshSig$ = prevRefreshSig;
+							__spinx_hot__.accept(() => {
+								window.$RefreshRuntime$.performReactRefresh();
+							});
+						}
+				`, componentName, componentName, componentName, hash, componentName, componentName)
+			}
+		}
 
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.repr = &reprJS{ast: ast}

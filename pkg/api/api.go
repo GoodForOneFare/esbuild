@@ -281,6 +281,7 @@ type BuildOptions struct {
 
 	Watch *WatchMode
 	SpinxAssetBaseUrl string
+	SpinxHotReact     bool
 }
 
 type EntryPoint struct {

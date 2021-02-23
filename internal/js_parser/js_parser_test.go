@@ -3581,11 +3581,11 @@ func TestASCIIOnly(t *testing.T) {
 	fmt.Println("Say hi")
 
 	expectPrintedJSX(t, `
-		// export function Foo() {
-		// 	const bar = 'yes';
-		// 	return bar;
-		// }
-		window.$RefreshReg$ = "Hello";
-		console.log("Hello")
+		export function Foo() {
+			const bar = 'yes';
+			return bar;
+		}
+		// window.$RefreshReg$ = "Hello";
+		// console.log("Hello")
 		`, "console.log(\"yes\");\n")
 }

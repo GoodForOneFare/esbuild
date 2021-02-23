@@ -1,13 +1,14 @@
 package js_parser
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
+	// "regexp"
 	"sort"
 	"strings"
 	"unsafe"
+	// "encoding/json"
 
 	"github.com/evanw/esbuild/internal/ast"
 	"github.com/evanw/esbuild/internal/compat"
@@ -11994,15 +11995,15 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 	var parts []js_ast.Part
 	var after []js_ast.Part
 
-	// var refreshPreludeSource = logger.Source{
-	// 	Index:          0,
-	// 	KeyPath:        logger.Path{Text: "<reactRefreshPrelude>"},
-	// 	PrettyPath:     "<reactRefreshPrelude>",
-	// 	IdentifierName: "reactRefreshPrelude",
-	// 	Contents:       `console.log("hello");`,
-	// }
-
 	// if source.PrettyPath != "<reactRefreshPrelude>" {
+	// 	var refreshPreludeSource = logger.Source{
+	// 		Index:          0,
+	// 		KeyPath:        logger.Path{Text: "<reactRefreshPrelude>"},
+	// 		PrettyPath:     "<reactRefreshPrelude>",
+	// 		IdentifierName: "reactRefreshPrelude",
+	// 		Contents:       `console.log("hello");`,
+	// 	}
+		
 	// 	runtimeAST, _ := Parse(log, refreshPreludeSource, OptionsFromConfig(&config.Options{
 	// 		// These configuration options must only depend on the key
 	// 		MangleSyntax:      false,
@@ -12014,7 +12015,12 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 	// 		// include unnecessary runtime code
 	// 		Mode: config.ModeBundle,
 	// 	}))
-
+		
+	// 	bytes9, _ := json.MarshalIndent(runtimeAST.Parts[0].Stmts, "\t", "\t")
+	// 	println("YOYOYO");
+	// 	println("@@runtimeAST: " + string(bytes9))
+	// 	println("YOYOYO");
+	// 	p.storeNameInRef("console");
 	// 	parts = p.appendPart(parts, runtimeAST.Parts[0].Stmts)
 	// }
 	// @@this is interesting - injectedFiles being inserted into ASTs
@@ -12088,8 +12094,7 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 	// })
 	// p.declareCommonJSSymbol(js_ast.SymbolHoisted, "module")
 	// p.newSymbol(js_ast.SymbolHoisted, "module")
-
-	// println(fmt.Sprintf("XXX %+v", p.symbols[2]))
+	// p.loadNameFromRef(b.Ref)
 
 	// Bind symbols in a second pass over the AST. I started off doing this in a
 	// single pass, but it turns out it's pretty much impossible to do this
@@ -12129,67 +12134,99 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 		}
 	}
 
-	for _, stmt := range stmts {
-		println(fmt.Sprintf("%+v", reflect.TypeOf(stmt.Data)))
-		switch s := stmt.Data.(type) {
-		case *js_ast.SFunction:
-			println(fmt.Sprintf("YO %+v", s.Fn.Name.Ref))
-			for key, value := range p.moduleScope.Members {
-				if value.Ref == s.Fn.Name.Ref {
-					println(fmt.Sprintf("YO found %+v %s", s, key))
-				}
-			}
+	// for _, stmt := range stmts {
+	// 	switch s := stmt.Data.(type) {
+	// 	case *js_ast.SFunction:
+	// 		if strings.HasSuffix(source.PrettyPath, ".tsx") {
+	// 			segments := strings.Split(source.PrettyPath, "/")
+	// 			componentName := strings.Replace(segments[len(segments)-1], ".tsx", "", 1)
+	// 			fnName := findRefNameFromScope(p.moduleScope, s.Fn.Name.Ref)
+	// 			if (fnName == componentName) {
+	// 				s.Fn.Body.Stmts = append(
+	// 					[]js_ast.Stmt{{Loc: logger.Loc{}, Data: &js_ast.SDebugger{}}},
+	// 					s.Fn.Body.Stmts...,
+	// 				)
+	// 			}
+	// 		}
+	// 	}
+	// }
+	
+	// for _, stmt := range stmts {
+	// 	println(fmt.Sprintf("%+v", reflect.TypeOf(stmt.Data)))
+	// 	switch s := stmt.Data.(type) {
+	// 	case *js_ast.SFunction:
+	// 		println(fmt.Sprintf("YO %+v", s.Fn.Name.Ref))
+	// 		for key, value := range p.moduleScope.Members {
+	// 			if value.Ref == s.Fn.Name.Ref {
+	// 				println(fmt.Sprintf("YO found %+v %s", s, key))
+	// 			}
+	// 		}
 
-		case *js_ast.SExpr:
-			bytes, _ := json.MarshalIndent(s, "\t", "\t")
-			fmt.Println(string(bytes))
+	// 	case *js_ast.SExpr:
+	// 		bytes, _ := json.MarshalIndent(s, "\t", "\t")
+	// 		fmt.Println(string(bytes))
 
-			println(fmt.Sprintf("  sexpr stmt.Data type: %+v", reflect.TypeOf(stmt.Data)))
-			println(fmt.Sprintf("  sexpr value.Data type: %+v", reflect.TypeOf(s.Value.Data)))
+	// 		println(fmt.Sprintf("  sexpr stmt.Data type: %+v", reflect.TypeOf(stmt.Data)))
+	// 		println(fmt.Sprintf("  sexpr value.Data type: %+v", reflect.TypeOf(s.Value.Data)))
 
-			switch t := s.Value.Data.(type) {
-			case *js_ast.ECall:
-				println(fmt.Sprintf("    ecall target: %+v", t.Target))
-				println(fmt.Sprintf("    ecall target type: %+v", reflect.TypeOf(t.Target)))
-				println(fmt.Sprintf("    ecall args type: %+v", reflect.TypeOf(t.Args)))
-				println(fmt.Sprintf("    ecall target data type: %+v", reflect.TypeOf(t.Target.Data)))
+	// 		switch t := s.Value.Data.(type) {
+	// 		case *js_ast.ECall:
+	// 			println(fmt.Sprintf("    ecall target: %+v", t.Target))
+	// 			println(fmt.Sprintf("    ecall target type: %+v", reflect.TypeOf(t.Target)))
+	// 			println(fmt.Sprintf("    ecall args type: %+v", reflect.TypeOf(t.Args)))
+	// 			println(fmt.Sprintf("    ecall target data type: %+v", reflect.TypeOf(t.Target.Data)))
 
-				switch u := t.Target.Data.(type) {
-				case *js_ast.EDot:
-					println(fmt.Sprintf("    edot target data type: %+v", reflect.TypeOf(u.Target.Data)))
+	// 			switch u := t.Target.Data.(type) {
+	// 			case *js_ast.EDot:
+	// 				println(fmt.Sprintf("    edot target data type: %+v", reflect.TypeOf(u.Target.Data)))
 
-					switch v := u.Target.Data.(type) {
-					case *js_ast.EIdentifier:
-						println(fmt.Sprintf("    edot target data ref: %+v", v.Ref))
-						println(fmt.Sprintf("    edot name: %+v", u.Name))
-					}
-				}
-			}
+	// 				switch v := u.Target.Data.(type) {
+	// 				case *js_ast.EIdentifier:
+	// 					println(fmt.Sprintf("    edot target data ref: %+v", v.Ref))
+	// 					println(fmt.Sprintf("    edot name: %+v", u.Name))
+	// 				}
+	// 			}
+	// 		}
 
-			println(fmt.Sprintf("  %+v", stmt.Loc.Start))
-			println()
-		}
-	}
+	// 		println(fmt.Sprintf("  %+v", stmt.Loc.Start))
+	// 		println()
+	// 	}
+	// }
 
-	bytes5, _ := json.MarshalIndent(stmts, "\t", "\t")
-	fmt.Println(string(bytes5))
+	// bytes5, _ := json.MarshalIndent(stmts, "\t", "\t")
+	// fmt.Println(string(bytes5))
 
-	bytes2, _ := json.MarshalIndent(p.allocatedNames, "\t", "\t")
-	fmt.Println("@@allocatedNames: " + string(bytes2))
+	// bytes2, _ := json.MarshalIndent(p.allocatedNames, "\t", "\t")
+	// fmt.Println("@@allocatedNames: " + string(bytes2))
 
-	println("@@@@@")
-	bytes3, _ := json.MarshalIndent(p.moduleScope.Members, "\t", "\t")
-	fmt.Println("@@moduleScope.Members: " + string(bytes3))
-	println("@@@@@")
+	// println("@@@@@")
+	// bytes3, _ := json.MarshalIndent(p.moduleScope.Members, "\t", "\t")
+	// fmt.Println("@@moduleScope.Members: " + string(bytes3))
+	// println("@@@@@")
 
 	// Pop the module scope to apply the "ContainsDirectEval" rules
 	p.popScope()
 
-	println("!!!!")
-	for _, s3 := range stmts {
-		printTreeTypes(s3, 0)
-	}
-	println("!!!!")
+	// if options.platform == config.PlatformBrowser && strings.HasSuffix(source.PrettyPath, ".tsx") {
+	// 	segments := strings.Split(source.PrettyPath, "/")
+	// 	componentName := strings.Replace(segments[len(segments)-1], ".tsx", "", 1)
+	// 	matched, _ := regexp.MatchString(`^[a-zA-Z0-9]+$`, componentName)
+	// 	if matched {
+	// 		if _, ok := p.moduleScope.Members[componentName]; ok {
+	// 			// println(fmt.Sprintf("%s: %+v", source.PrettyPath, ref))
+	// 		} else {
+	// 			println(fmt.Sprintf("@@noref :( %s %s %+v", source.PrettyPath, componentName, p.moduleScope.Members))
+	// 		}
+	// 	} else {
+	// 		println(fmt.Sprintf("@@nomatch %s", source.PrettyPath))
+	// 	}
+	// }
+	// println("!!!!")
+	// for _, s3 := range stmts {
+	// 	printTreeTypes(p, s3, 0)
+	// }
+	// println("!!!!")
+
 	parts = append(append(before, parts...), after...)
 	result = p.toAST(source, parts, hashbang, directive)
 	result.SourceMapComment = p.lexer.SourceMappingURL
@@ -12206,15 +12243,191 @@ func PadLeft(length int) string {
 	}
 }
 
-func printTreeTypesE(expr js_ast.E, indent int) {
+func printOpCode(o js_ast.OpCode, indent int) {
 	indentStr := PadLeft(indent)
 
-	println(indentStr + fmt.Sprintf("%+v", reflect.TypeOf(expr)))
+	switch o {
+	case js_ast.BinOpStrictEq:
+		println(indentStr + "===")
+
+	case js_ast.BinOpLooseEq:
+		println(indentStr + "==")
+
+	case js_ast.BinOpAssign:
+		println(indentStr + "=")
+
+	case js_ast.UnOpPos:
+		println(indentStr + "?")
+	case js_ast.UnOpNeg:
+		println(indentStr + "?")
+	case js_ast.UnOpCpl:
+		println(indentStr + "?")
+	case js_ast.UnOpNot:
+		println(indentStr + "?")
+	case js_ast.UnOpVoid:
+		println(indentStr + "?")
+	case js_ast.UnOpTypeof:
+		println(indentStr + "?")
+	case js_ast.UnOpDelete:
+		println(indentStr + "?")
+	case js_ast.UnOpPreDec:
+		println(indentStr + "?")
+	case js_ast.UnOpPreInc:
+		println(indentStr + "?")
+	case js_ast.UnOpPostDec:
+		println(indentStr + "?")
+	case js_ast.UnOpPostInc:
+		println(indentStr + "?")
+	case js_ast.BinOpAdd:
+		println(indentStr + "?")
+	case js_ast.BinOpSub:
+		println(indentStr + "?")
+	case js_ast.BinOpMul:
+		println(indentStr + "?")
+	case js_ast.BinOpDiv:
+		println(indentStr + "?")
+	case js_ast.BinOpRem:
+		println(indentStr + "?")
+	case js_ast.BinOpPow:
+		println(indentStr + "?")
+	case js_ast.BinOpLt:
+		println(indentStr + "?")
+	case js_ast.BinOpLe:
+		println(indentStr + "?")
+	case js_ast.BinOpGt:
+		println(indentStr + "?")
+	case js_ast.BinOpGe:
+		println(indentStr + "?")
+	case js_ast.BinOpIn:
+		println(indentStr + "?")
+	case js_ast.BinOpInstanceof:
+		println(indentStr + "?")
+	case js_ast.BinOpShl:
+		println(indentStr + "?")
+	case js_ast.BinOpShr:
+		println(indentStr + "?")
+	case js_ast.BinOpUShr:
+		println(indentStr + "?")
+	case js_ast.BinOpLooseNe:
+		println(indentStr + "?")
+	case js_ast.BinOpStrictNe:
+		println(indentStr + "?")
+	case js_ast.BinOpNullishCoalescing:
+		println(indentStr + "?")
+	case js_ast.BinOpLogicalOr:
+		println(indentStr + "?")
+	case js_ast.BinOpLogicalAnd:
+		println(indentStr + "?")
+	case js_ast.BinOpBitwiseOr:
+		println(indentStr + "?")
+	case js_ast.BinOpBitwiseAnd:
+		println(indentStr + "?")
+	case js_ast.BinOpBitwiseXor:
+		println(indentStr + "?")
+	case js_ast.BinOpComma:
+		println(indentStr + "?")
+	case js_ast.BinOpAddAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpSubAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpMulAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpDivAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpRemAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpPowAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpShlAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpShrAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpUShrAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpBitwiseOrAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpBitwiseAndAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpBitwiseXorAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpNullishCoalescingAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpLogicalOrAssign:
+		println(indentStr + "?")
+	case js_ast.BinOpLogicalAndAssign:
+		println(indentStr + "?")
+
+	default:
+		println(indentStr + fmt.Sprintf("%+v", o))
+	}
+}
+
+func findRefNameFromScope(scope *js_ast.Scope, ref js_ast.Ref) string {
+	for key, member := range scope.Members {
+		if member.Ref == ref {
+			return key
+		}
+	}
+
+	for _, childScope := range scope.Children {
+		foundKey := findRefNameFromScope(childScope, ref)
+		if foundKey != "" {
+			return foundKey
+		}
+	}
+	return ""
+	// for _, moduleScopeMember := range p.moduleScope.Members {
+	// 	println(fmt.Sprintf("@@ module scope member - %+v", moduleScopeMember))
+	// 	println(fmt.Sprintf("  @@ symbol lookup: %+v - %+v",
+	// 	reflect.TypeOf(moduleScopeMember),
+	// 	p.symbols[int(moduleScopeMember.Ref.InnerIndex)]))
+	// 	println(fmt.Sprintf("  @@toplevel %+v", p.topLevelSymbolToParts[moduleScopeMember.Ref]))
+	// }
+
+}
+
+func printTreeTypesE(p *parser, expr js_ast.E, indent int) {
+	indentStr := PadLeft(indent)
+	indentTypeStr := indentStr + fmt.Sprintf("%+v", reflect.TypeOf(expr))
+
 	switch e := expr.(type) {
 	case *js_ast.EBinary:
-		printTreeTypes(e.Left.Data)
-		println(indentStr + fmt.Sprintf("Op: %+v", e.Op))
-		printTreeTypes(e.Right.Data)
+		println(indentTypeStr)
+		printTreeTypesE(p, e.Left.Data, indent+1)
+		printOpCode(e.Op, indent+2)
+		printTreeTypesE(p, e.Right.Data, indent+1)
+
+	case *js_ast.EDot:
+		println(indentTypeStr)
+		printTreeTypesE(p, e.Target.Data, indent)
+		println(PadLeft(indent+1) + "Name: " + e.Name)
+
+	case *js_ast.EString:
+		println(PadLeft(indent+1) + "*js_ast.ESString: " + js_lexer.UTF16ToString(e.Value))
+
+	case *js_ast.ECall:
+		println(indentTypeStr)
+		printTreeTypesE(p, e.Target.Data, indent+1)
+		println(PadLeft(indent+2) + "Args:")
+		for _, arg := range e.Args {
+			printTreeTypesE(p, arg.Data, indent+2)
+		}
+
+	case *js_ast.EIdentifier:
+		// for _, moduleScopeMember := range p.moduleScope.Members {
+		// 	println(fmt.Sprintf("@@ module scope member - %+v", moduleScopeMember))
+		// 	println(fmt.Sprintf("  @@ symbol lookup: %+v - %+v",
+		// 		reflect.TypeOf(moduleScopeMember),
+		// 		p.symbols[int(moduleScopeMember.Ref.InnerIndex)]))
+		// 	println(fmt.Sprintf("  @@toplevel %+v", p.topLevelSymbolToParts[moduleScopeMember.Ref]))
+		// }
+
+		// println(indentTypeStr) // + p.loadNameFromRef(e.Ref))
+		// println(indentTypeStr + fmt.Sprintf("%+v", p.moduleScope.Members))
+		println(indentTypeStr + "Target: " + findRefNameFromScope(p.moduleScope, e.Ref))
+
+	default:
+		println(PadLeft(indent+1) + fmt.Sprintf("unknown %+v", reflect.TypeOf(e)))
 	}
 
 	// func (*EArray) isExpr()             {}
@@ -12255,7 +12468,36 @@ func printTreeTypesE(expr js_ast.E, indent int) {
 
 }
 
-func printTreeTypesS(stmt js_ast.S, indent int) {
+func printTreeFn(p *parser, aFn js_ast.Fn, indent int) {
+	indentStr := PadLeft(indent)
+	println(indentStr + "Name: " + findRefNameFromScope(p.moduleScope, aFn.Name.Ref))
+	
+
+	// parts = p.appendPart(parts, []})
+	// stmts = append([]js_ast.Stmt{stmts[0], stmt}, stmts[1:]...)
+	// aFn.Body.Stmts = append(
+	// 	aFn.Body.Stmts,
+	// 	js_ast.Stmt{
+	// 		Loc: logger.Loc{}, Data: &js_ast.SDebugger{},
+	// 	},
+	// 	// aFn.Body.Stmts...,
+	// )	
+	// aFn.Body.Stmts = []js_ast.Stmt{}
+	
+	// aFn.Body.Stmts[0] = js_ast.Stmt{Loc: logger.Loc{}, Data: &js_ast.SDebugger{}}
+		// Name         *LocRef
+		// OpenParenLoc logger.Loc
+		// Args         []Arg
+		// Body         FnBody
+		// ArgumentsRef Ref
+	
+		// IsAsync     bool
+		// IsGenerator bool
+		// HasRestArg  bool
+		// HasIfScope  bool
+}
+
+func printTreeTypesS(p *parser, stmt js_ast.S, indent int) {
 	indentStr := PadLeft(indent)
 
 	println(indentStr + fmt.Sprintf("%+v", reflect.TypeOf(stmt)))
@@ -12263,7 +12505,7 @@ func printTreeTypesS(stmt js_ast.S, indent int) {
 	switch s := stmt.(type) {
 	case *js_ast.SBlock:
 		for _, s := range s.Stmts {
-			printTreeTypes(s, indent+1)
+			printTreeTypes(p, s, indent+1)
 		}
 	// case *js_ast.SComment:
 	// case *js_ast.SDebugger:
@@ -12277,8 +12519,12 @@ func printTreeTypesS(stmt js_ast.S, indent int) {
 	// case *js_ast.SExportEquals:
 	// case *js_ast.SLazyExport:
 	case *js_ast.SExpr:
-		printTreeTypesE(s.Value.Data, indent+1)
+		printTreeTypesE(p, s.Value.Data, indent+1)
 
+	case *js_ast.SFunction:
+		println(PadLeft(indent + 1) + fmt.Sprintf("IsExport: %+v", s.IsExport))
+		printTreeFn(p, s.Fn, indent + 1)
+	
 		// case *js_ast.SEnum:
 		// case *js_ast.SNamespace:
 		// case *js_ast.SFunction:
@@ -12303,17 +12549,17 @@ func printTreeTypesS(stmt js_ast.S, indent int) {
 	}
 }
 
-func printTreeTypes(stmt js_ast.Stmt, indent int) {
+func printTreeTypes(p *parser, stmt js_ast.Stmt, indent int) {
 	indentStr := PadLeft(indent)
 
 	println(indentStr + fmt.Sprintf("%+v", reflect.TypeOf(stmt)))
 
 	switch s := stmt.Data.(type) {
 	case *js_ast.SFunction:
-		printTreeTypesS(s, indent+1)
+		printTreeTypesS(p, s, indent+1)
 
 	case *js_ast.SExpr:
-		printTreeTypesS(s, indent+1)
+		printTreeTypesS(p, s, indent+1)
 		// bytes, _ := json.MarshalIndent(s, "\t", "\t")
 		// fmt.Println(string(bytes))
 

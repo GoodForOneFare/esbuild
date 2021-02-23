@@ -287,8 +287,8 @@ func parseFile(args parseArgs) {
 		if args.options.Platform == config.PlatformBrowser {
 			segments := strings.Split(source.PrettyPath, "/")
 			componentName := strings.Replace(segments[len(segments)-1], ".tsx", "", 1)
-			matched, err := regexp.MatchString(`^[a-zA-Z0-9]+$`, componentName)
-			println(fmt.Sprintf("@@"+source.PrettyPath+": "+componentName+": %s _ %s", matched, err))
+			matched, _ := regexp.MatchString(`^[a-zA-Z0-9]+$`, componentName)
+			// println(fmt.Sprintf("@@"+source.PrettyPath+": "+componentName+": %s _ %s", matched, err))
 			if matched {
 				hash := "1"
 				source.Contents = fmt.Sprintf(`
@@ -323,51 +323,9 @@ func parseFile(args parseArgs) {
 							});					
 						}
 				`, componentName, componentName, componentName, hash, componentName, componentName)
-
-				// if source.PrettyPath == "app/components/ContextualContentCarousel/components/ContextualMediaCard/components/ContextualTextThumbnail/ContextualTextThumbnail.tsx" {
-				// 	println("@@SOURCE: " + source.Contents)
-				// }
-				if source.PrettyPath == "app/sections/Inventory/Movements/PurchaseOrders/PurchaseOrderDetails/hooks/use-export-pdf-action/use-export-pdf-action.tsx" ||
-					source.PrettyPath == "app/utilities/channel-picker/with-channels.tsx" ||
-					source.PrettyPath == "packages/@shopify/apollo-workarounds/with-graphql.tsx" ||
-					source.PrettyPath == "packages/@web-utilities/loading/with-loading.tsx" {
-					println("@@SOURCE: " + source.Contents)
-				}
 			}
 		}
-		// if args.options.Platform == config.PlatformBrowser && strings.Contains(source.Contents, "import React from") {
-		// 	// source.Contents = `
-		// 	// var prevRefreshReg = window.$RefreshReg$;
-		// 	// var prevRefreshSig = window.$RefreshSig$;
-		// 	// import RefreshRuntime from 'react-refresh/runtime';
 
-		// 	// 	window.$RefreshReg$ = (type, id) => {
-		// 	// 		// Note module.id is webpack-specific, this may vary in other bundlers
-		// 	// 		const fullId = module.id + ' ' + id;
-		// 	// 		RefreshRuntime.register(type, fullId);
-		// 	// 	}
-		// 	// 	window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
-		// 	// ` + source.Contents +
-		// 	// 	`  window.$RefreshReg$ = prevRefreshReg;
-		// 	// window.$RefreshSig$ = prevRefreshSig;
-		// 	// `
-
-		// 	source.Contents = `
-		// 	const narf = window;
-		// 	var prevRefreshReg = narf.$RefreshReg$;
-		// 	var prevRefreshSig = narf.$RefreshSig$;
-
-		// 	import RefreshRuntime from 'react-refresh/runtime';
-		// 	narf.$RefreshReg$ = (type, id) => {
-		// 		// Note module.id is webpack-specific, this may vary in other bundlers
-		// 		const fullId = module.id + ' lol ' + id;
-		// 		RefreshRuntime.register(type, fullId);
-		// 	}
-
-		// 	narf.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
-		// 	console.log('hello', narf);
-		// 	` + source.Contents
-		// }
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 
 		// var buffer = fmt.Sprintf("%s %d\n", args.prettyPath, len(ast.NamedImports))
@@ -1002,6 +960,30 @@ func ScanBundle(log logger.Log, fs fs.FS, res resolver.Resolver, caches *cache.C
 		source, ast, ok := globalRuntimeCache.parseRuntime(&options)
 		s.resultChannel <- parseResult{file: file{source: source, repr: &reprJS{ast: ast}}, ok: ok}
 	}()
+	// if options.Platform == config.PlatformBrowser {		
+	// 	s.remaining++
+	// 	go func() {
+	// 		var source = logger.Source{
+	// 			Index:          0,
+	// 			KeyPath:        logger.Path{Text: "<reactRefresh>"},
+	// 			PrettyPath:     "<reactRefresh>",
+	// 			IdentifierName: "reactRefresh",
+	// 			Contents:       `					
+	// 				const runtime = require('react-refresh/runtime');					
+	// 			`,
+	// 		}
+			
+	// 		ast, ok := js_parser.Parse(log, source, js_parser.OptionsFromConfig(&config.Options{
+	// 			MangleSyntax:      false,
+	// 			MinifyIdentifiers: false,
+	// 			Platform:          config.PlatformBrowser,
+	// 			Mode: config.ModeBundle,
+	// 		}))
+
+	// 		println("???OK " + fmt.Sprintf("%+v", ok))
+	// 		s.resultChannel <- parseResult{file: file{source: source, repr: &reprJS{ast: ast}}, ok: ok}
+	// 	}()
+	// }
 
 	s.preprocessInjectedFiles()
 	entryPointIndices := s.addEntryPoints(entryPoints)

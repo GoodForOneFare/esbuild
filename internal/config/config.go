@@ -259,6 +259,7 @@ type Options struct {
 
 	Stdin *StdinInfo
 	SpinxAssetBaseURL string
+	SpinxHotReact     bool
 }
 
 type PathPlaceholder uint8

@@ -63,6 +63,7 @@ export interface BuildOptions extends CommonOptions {
   absWorkingDir?: string;
   nodePaths?: string[]; // The "NODE_PATH" variable from Node.js
   watch?: boolean | WatchMode;
+  spinxAssetBaseUrl: string;
 }
 
 export interface WatchMode {

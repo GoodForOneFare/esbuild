@@ -811,6 +811,7 @@ func rebuildImpl(
 		PreserveSymlinks:      buildOpts.PreserveSymlinks,
 		WatchMode:             buildOpts.Watch != nil,
 		Plugins:               plugins,
+		SpinxAssetBaseURL:     buildOpts.SpinxAssetBaseUrl,
 	}
 	if options.MainFields != nil {
 		options.MainFields = append([]string{}, options.MainFields...)

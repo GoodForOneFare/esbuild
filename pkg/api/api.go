@@ -272,6 +272,7 @@ type BuildOptions struct {
 	Plugins     []Plugin
 
 	Watch *WatchMode
+	SpinxAssetBaseUrl string
 }
 
 type WatchMode struct {

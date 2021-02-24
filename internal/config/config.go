@@ -227,6 +227,7 @@ type Options struct {
 	ExcludeSourcesContent bool
 
 	Stdin *StdinInfo
+	SpinxAssetBaseURL string
 }
 
 func IsTreeShakingEnabled(mode Mode, outputFormat Format) bool {

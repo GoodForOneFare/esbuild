@@ -198,6 +198,7 @@ function flagsForBuildOptions(
   let stdin = getFlag(options, keys, 'stdin', mustBeObject);
   let write = getFlag(options, keys, 'write', mustBeBoolean) ?? writeDefault; // Default to true if not specified
   let incremental = getFlag(options, keys, 'incremental', mustBeBoolean) === true;
+  let spinxAssetBaseUrl = getFlag(options, keys, 'spinxAssetBaseUrl', mustBeString);
   keys.plugins = true; // "plugins" has already been read earlier
   checkForInvalidFlags(options, keys, `in ${callName}() call`);
 
@@ -214,6 +215,7 @@ function flagsForBuildOptions(
       watchMode = { onRebuild };
     }
   }
+  if (spinxAssetBaseUrl) flags.push(`--spinx-asset-base-url=${spinxAssetBaseUrl}`);
   if (splitting) flags.push('--splitting');
   if (preserveSymlinks) flags.push('--preserve-symlinks');
   if (metafile) flags.push(`--metafile`);

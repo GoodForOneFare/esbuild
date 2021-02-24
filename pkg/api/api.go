@@ -281,6 +281,7 @@ type BuildOptions struct {
 	Plugins     []Plugin
 
 	Watch *WatchMode
+	SpinxAssetBaseUrl string
 }
 
 type EntryPoint struct {

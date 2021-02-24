@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -95,6 +96,36 @@ type tlaCheck struct {
 	importRecordIndex uint32
 }
 
+func insertTranslationsImport(assetsBaseUrl string, path string, contents string, replaced string, translationsCache *cache.TranslationsCache) string {
+	var dir = filepath.Dir(path)
+	var aPath = dir
+	for {
+		if translationsCache.HasEnTranslations(aPath) {
+			break
+		}
+
+		if aPath == "." {
+			return contents
+		}
+
+		aPath = filepath.Dir(aPath)
+	}
+
+	var translationsFile = filepath.Join(aPath, "translations", "en.json")
+	var fetchFnStr = `async (e) => { const n = await fetch('` + assetsBaseUrl + filepath.Join(aPath, "translations") + `/' + e + '.json'); return n.json(); }`
+	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations: " + fetchFnStr + "})", 1)
+	return "import _en from '" + translationsFile + "';\n" + newContents
+}
+
+func translationsHack(assetsBaseUrl string, path string, contents string, translationsCache *cache.TranslationsCache) string {
+	if strings.Contains(contents, "useI18n()") {
+		return insertTranslationsImport(assetsBaseUrl, path, contents, "useI18n", translationsCache)
+	} else if strings.Contains(contents, "withI18n()") {
+		return insertTranslationsImport(assetsBaseUrl, path, contents, "withI18n", translationsCache)
+	}
+	return contents
+}
+
 func parseFile(args parseArgs) {
 	source := logger.Source{
 		Index:          args.sourceIndex,
@@ -164,18 +195,26 @@ func parseFile(args parseArgs) {
 
 	switch loader {
 	case config.LoaderJS:
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.inputFile.Repr = &graph.JSRepr{AST: ast}
 		result.ok = ok
 
 	case config.LoaderJSX:
 		args.options.JSX.Parse = true
+
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.inputFile.Repr = &graph.JSRepr{AST: ast}
 		result.ok = ok
 
 	case config.LoaderTS:
 		args.options.TS.Parse = true
+
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.inputFile.Repr = &graph.JSRepr{AST: ast}
 		result.ok = ok
@@ -183,6 +222,9 @@ func parseFile(args parseArgs) {
 	case config.LoaderTSX:
 		args.options.TS.Parse = true
 		args.options.JSX.Parse = true
+
+		source.Contents = translationsHack(args.options.SpinxAssetBaseURL, source.PrettyPath, source.Contents, &args.caches.TranslationsCache)
+
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.inputFile.Repr = &graph.JSRepr{AST: ast}
 		result.ok = ok

@@ -258,6 +258,7 @@ type Options struct {
 	ExcludeSourcesContent bool
 
 	Stdin *StdinInfo
+	SpinxAssetBaseURL string
 }
 
 type PathPlaceholder uint8

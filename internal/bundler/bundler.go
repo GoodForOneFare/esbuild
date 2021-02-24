@@ -170,7 +170,7 @@ func insertTranslationsImport(assetsBaseUrl string, path string, contents string
 
 	var translationsFile = filepath.Join(aPath, "translations", "en.json")
 	var fetchFnStr = `async (e) => { const n = await fetch('` + assetsBaseUrl + filepath.Join(aPath, "translations") + `/' + e + '.json'); return n.json(); }`
-	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations: " + fetchFnStr + "})", 1)
+	var newContents = strings.Replace(contents, replaced+"()", replaced+"({id: '"+path+"', fallback: _en, translations: "+fetchFnStr+"})", 1)
 	return "import _en from '" + translationsFile + "';\n" + newContents
 }
 

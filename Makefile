@@ -164,16 +164,8 @@ publish-all: cmd/esbuild/version.go test-prepublish
 	# @echo "Checking for unpushed commits..." && git fetch
 	# @test "" = "`git cherry`" || (echo "Refusing to publish with unpushed commits" && false)
 	rm -fr npm && git checkout npm
-	make -j4 \
-		publish-windows \
-		publish-windows-32 \
-		publish-freebsd \
-		publish-freebsd-arm64	
-	make -j4 \
-		publish-darwin \
-		publish-darwin-arm64 \
-		publish-linux \
-		publish-linux-32
+	# make -j4 \
+	# 	publish-darwin-arm64
 	make -j4 \
 		publish-linux-arm \
 		publish-linux-arm64 \
@@ -187,29 +179,29 @@ publish-all: cmd/esbuild/version.go test-prepublish
 	git tag "v$(ESBUILD_VERSION)"
 	git push me master "v$(ESBUILD_VERSION)"
 
-publish-windows: platform-windows
-	cd npm/esbuild-windows-64 && npm publish --access public
+# publish-windows: platform-windows
+# 	cd npm/esbuild-windows-64 && npm publish --access public
 
-publish-windows-32: platform-windows-32
-	cd npm/esbuild-windows-32 && npm publish --access public
+# publish-windows-32: platform-windows-32
+# 	cd npm/esbuild-windows-32 && npm publish --access public
 
-publish-darwin: platform-darwin
-	cd npm/esbuild-darwin-64 && npm publish --access public
+# publish-darwin: platform-darwin
+# 	cd npm/esbuild-darwin-64 && npm publish --access public
 
 publish-darwin-arm64: platform-darwin-arm64
-	test -n "$(OTP)" && cd npm/esbuild-darwin-arm64 && npm publish --otp="$(OTP)"
+	test -n "$(OTP)" && cd npm/esbuild-darwin-arm64 && npm publish --access public
 
-publish-freebsd: platform-freebsd
-	cd npm/esbuild-freebsd-64 && npm publish --access public
+# publish-freebsd: platform-freebsd
+# 	cd npm/esbuild-freebsd-64 && npm publish --access public
 
-publish-freebsd-arm64: platform-freebsd-arm64
-	cd npm/esbuild-freebsd-arm64 && npm publish --access public
+# publish-freebsd-arm64: platform-freebsd-arm64
+# 	cd npm/esbuild-freebsd-arm64 && npm publish --access public
 
-publish-linux: platform-linux
-	cd npm/esbuild-linux-64 && npm publish --access public
+# publish-linux: platform-linux
+# 	cd npm/esbuild-linux-64 && npm publish --access public
 
-publish-linux-32: platform-linux-32
-	cd npm/esbuild-linux-32 && npm publish --access public
+# publish-linux-32: platform-linux-32
+# 	cd npm/esbuild-linux-32 && npm publish --access public
 
 publish-linux-arm: platform-linux-arm
 	cd npm/esbuild-linux-arm && npm publish --access public

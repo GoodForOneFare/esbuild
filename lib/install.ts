@@ -271,20 +271,20 @@ function installOnWindows(name: string): void {
 
 const platformKey = `${process.platform} ${os.arch()} ${os.endianness()}`;
 const knownWindowsPackages: Record<string, string> = {
-  'win32 ia32 LE': 'esbuild-windows-32',
-  'win32 x64 LE': 'esbuild-windows-64',
+  'win32 ia32 LE': '@goodforonefare/esbuild-windows-32',
+  'win32 x64 LE': '@goodforonefare/esbuild-windows-64',
 };
 const knownUnixlikePackages: Record<string, string> = {
-  'darwin x64 LE': 'esbuild-darwin-64',
-  'darwin arm64 LE': 'esbuild-darwin-arm64',
-  'freebsd arm64 LE': 'esbuild-freebsd-arm64',
-  'freebsd x64 LE': 'esbuild-freebsd-64',
-  'linux arm LE': 'esbuild-linux-arm',
-  'linux arm64 LE': 'esbuild-linux-arm64',
-  'linux ia32 LE': 'esbuild-linux-32',
-  'linux mips64el LE': 'esbuild-linux-mips64le',
-  'linux ppc64 LE': 'esbuild-linux-ppc64le',
-  'linux x64 LE': 'esbuild-linux-64',
+  'darwin x64 LE': '@goodforonefare/esbuild-darwin-64',
+  'darwin arm64 LE': '@goodforonefare/esbuild-darwin-arm64',
+  'freebsd arm64 LE': '@goodforonefare/esbuild-freebsd-arm64',
+  'freebsd x64 LE': '@goodforonefare/esbuild-freebsd-64',
+  'linux arm LE': '@goodforonefare/esbuild-linux-arm',
+  'linux arm64 LE': '@goodforonefare/esbuild-linux-arm64',
+  'linux ia32 LE': '@goodforonefare/esbuild-linux-32',
+  'linux mips64el LE': '@goodforonefare/esbuild-linux-mips64le',
+  'linux ppc64 LE': '@goodforonefare/esbuild-linux-ppc64le',
+  'linux x64 LE': '@goodforonefare/esbuild-linux-64',
 };
 
 // Pick a package to install

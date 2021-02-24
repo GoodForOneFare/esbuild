@@ -150,7 +150,7 @@ func main() {
 				logger.PrintErrorToStderr(osArgs,
 					fmt.Sprintf("Cannot start service: Host version %q does not match binary version %q",
 						hostVersion, esbuildVersion))
-				os.Exit(1)
+				// os.Exit(1)
 			}
 
 		case strings.HasPrefix(arg, "--ping"):

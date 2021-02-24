@@ -32,11 +32,12 @@ import (
 //   reused even if the contents of that "package.json" file have changed.
 //
 type CacheSet struct {
-	SourceIndexCache SourceIndexCache
-	FSCache          FSCache
-	CSSCache         CSSCache
-	JSONCache        JSONCache
-	JSCache          JSCache
+	SourceIndexCache  SourceIndexCache
+	FSCache           FSCache
+	CSSCache          CSSCache
+	JSONCache         JSONCache
+	JSCache           JSCache
+	TranslationsCache TranslationsCache
 }
 
 func MakeCacheSet() *CacheSet {
@@ -56,6 +57,9 @@ func MakeCacheSet() *CacheSet {
 		},
 		JSCache: JSCache{
 			entries: make(map[logger.Path]*jsCacheEntry),
+		},
+		TranslationsCache: TranslationsCache{
+			entries: make(map[string]*bool),
 		},
 	}
 }

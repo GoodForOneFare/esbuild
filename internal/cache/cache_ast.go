@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/evanw/esbuild/internal/css_ast"
@@ -131,6 +133,33 @@ func (c *JSONCache) Parse(log logger.Log, source logger.Source, options js_parse
 	defer c.mutex.Unlock()
 	c.entries[source.KeyPath] = entry
 	return expr, ok
+}
+
+type TranslationsCache struct {
+	mutex   sync.Mutex
+	entries map[string]*bool
+}
+
+func (c *TranslationsCache) HasEnTranslations(path string) bool {
+	entry := func() *bool {
+		c.mutex.Lock()
+		defer c.mutex.Unlock()
+		return c.entries[path]
+	}()
+
+	if entry != nil {
+		return *entry
+	}
+
+	translationsFile := filepath.Join(path, "translations", "en.json")
+	_, err := os.Stat(translationsFile)
+	var found = !os.IsNotExist(err)
+
+	// Save for next time
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.entries[path] = &found
+	return found
 }
 
 ////////////////////////////////////////////////////////////////////////////////

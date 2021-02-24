@@ -74,6 +74,9 @@ func parseOptionsImpl(
 				transformOpts.MinifyIdentifiers = true
 			}
 
+		case strings.HasPrefix(arg, "--spinx-asset-base-url="):
+			buildOpts.SpinxAssetBaseUrl = arg[len("--spinx-asset-base-url:"):]
+
 		case arg == "--minify-syntax":
 			if buildOpts != nil {
 				buildOpts.MinifySyntax = true

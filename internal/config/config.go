@@ -269,6 +269,7 @@ type Options struct {
 	ExcludeSourcesContent bool
 
 	Stdin *StdinInfo
+	SpinxAssetBaseURL string
 }
 
 type TSTarget struct {

@@ -1,16 +1,20 @@
-import fs = require('fs');
-import os = require('os');
-import path = require('path');
-import zlib = require('zlib');
-import https = require('https');
-import child_process = require('child_process');
+import fs = require("fs");
+import os = require("os");
+import path = require("path");
+import zlib = require("zlib");
+import https = require("https");
+import child_process = require("child_process");
 
 declare const ESBUILD_VERSION: string;
 
 const version = ESBUILD_VERSION;
-const binPath = path.join(__dirname, 'bin', 'esbuild');
+const binPath = path.join(__dirname, "bin", "esbuild");
 
-async function installBinaryFromPackage(name: string, fromPath: string, toPath: string): Promise<void> {
+async function installBinaryFromPackage(
+  name: string,
+  fromPath: string,
+  toPath: string
+): Promise<void> {
   // Try to install from the cache if possible
   const cachePath = getCachePath(name);
   try {
@@ -22,11 +26,10 @@ async function installBinaryFromPackage(name: string, fromPath: string, toPath: 
     validateBinaryVersion(toPath);
 
     // Mark the cache entry as used for LRU
-    const now = new Date;
+    const now = new Date();
     fs.utimesSync(cachePath, now, now);
     return;
-  } catch {
-  }
+  } catch {}
 
   // Next, try to install using npm. This should handle various tricky cases
   // such as environments where requests to npmjs.org will hang (in which case
@@ -38,7 +41,9 @@ async function installBinaryFromPackage(name: string, fromPath: string, toPath: 
   } catch (err) {
     didFail = true;
     console.error(`Trying to install "${name}" using npm`);
-    console.error(`Failed to install "${name}" using npm: ${err && err.message || err}`);
+    console.error(
+      `Failed to install "${name}" using npm: ${(err && err.message) || err}`
+    );
   }
 
   // If that fails, the user could have npm configured incorrectly or could not
@@ -49,7 +54,11 @@ async function installBinaryFromPackage(name: string, fromPath: string, toPath: 
     try {
       buffer = extractFileFromTarGzip(await fetch(url), fromPath);
     } catch (err) {
-      console.error(`Failed to download ${JSON.stringify(url)}: ${err && err.message || err}`);
+      console.error(
+        `Failed to download ${JSON.stringify(url)}: ${
+          (err && err.message) || err
+        }`
+      );
     }
   }
 
@@ -66,7 +75,11 @@ async function installBinaryFromPackage(name: string, fromPath: string, toPath: 
   try {
     validateBinaryVersion(toPath);
   } catch (err) {
-    console.error(`The version of the downloaded binary is incorrect: ${err && err.message || err}`);
+    console.error(
+      `The version of the downloaded binary is incorrect: ${
+        (err && err.message) || err
+      }`
+    );
     console.error(`Install unsuccessful`);
     process.exit(1);
   }
@@ -79,44 +92,53 @@ async function installBinaryFromPackage(name: string, fromPath: string, toPath: 
     });
     fs.copyFileSync(toPath, cachePath);
     cleanCacheLRU(cachePath);
-  } catch {
-  }
+  } catch {}
 
   if (didFail) console.error(`Install successful`);
 }
 
 function validateBinaryVersion(binaryPath: string): void {
-  const stdout = child_process.execFileSync(binaryPath, ['--version']).toString().trim();
+  const stdout = child_process
+    .execFileSync(binaryPath, ["--version"])
+    .toString()
+    .trim();
   if (stdout !== version) {
-    throw new Error(`Expected ${JSON.stringify(version)} but got ${JSON.stringify(stdout)}`);
+    throw new Error(
+      `Expected ${JSON.stringify(version)} but got ${JSON.stringify(stdout)}`
+    );
   }
 }
 
 function getCachePath(name: string): string {
   const home = os.homedir();
-  const common = ['esbuild', 'bin', `${name}@${version}`];
-  if (process.platform === 'darwin') return path.join(home, 'Library', 'Caches', ...common);
-  if (process.platform === 'win32') return path.join(home, 'AppData', 'Local', 'Cache', ...common);
+  const common = ["esbuild", "bin", `${name}@${version}`];
+  if (process.platform === "darwin")
+    return path.join(home, "Library", "Caches", ...common);
+  if (process.platform === "win32")
+    return path.join(home, "AppData", "Local", "Cache", ...common);
 
   // https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
   const XDG_CACHE_HOME = process.env.XDG_CACHE_HOME;
-  if (process.platform === 'linux' && XDG_CACHE_HOME && path.isAbsolute(XDG_CACHE_HOME))
+  if (
+    process.platform === "linux" &&
+    XDG_CACHE_HOME &&
+    path.isAbsolute(XDG_CACHE_HOME)
+  )
     return path.join(XDG_CACHE_HOME, ...common);
 
-  return path.join(home, '.cache', ...common);
+  return path.join(home, ".cache", ...common);
 }
 
 function cleanCacheLRU(fileToKeep: string): void {
   // Gather all entries in the cache
   const dir = path.dirname(fileToKeep);
-  const entries: { path: string, mtime: Date }[] = [];
+  const entries: { path: string; mtime: Date }[] = [];
   for (const entry of fs.readdirSync(dir)) {
     const entryPath = path.join(dir, entry);
     try {
       const stats = fs.statSync(entryPath);
       entries.push({ path: entryPath, mtime: stats.mtime });
-    } catch {
-    }
+    } catch {}
   }
 
   // Only keep the most recent entries
@@ -124,22 +146,26 @@ function cleanCacheLRU(fileToKeep: string): void {
   for (const entry of entries.slice(5)) {
     try {
       fs.unlinkSync(entry.path);
-    } catch {
-    }
+    } catch {}
   }
 }
 
 function fetch(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    https.get(url, res => {
-      if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location)
-        return fetch(res.headers.location).then(resolve, reject);
-      if (res.statusCode !== 200)
-        return reject(new Error(`Server responded with ${res.statusCode}`));
-      let chunks: Buffer[] = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-    }).on('error', reject);
+    https
+      .get(url, (res) => {
+        if (
+          (res.statusCode === 301 || res.statusCode === 302) &&
+          res.headers.location
+        )
+          return fetch(res.headers.location).then(resolve, reject);
+        if (res.statusCode !== 200)
+          return reject(new Error(`Server responded with ${res.statusCode}`));
+        let chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve(Buffer.concat(chunks)));
+      })
+      .on("error", reject);
   });
 }
 
@@ -147,9 +173,12 @@ function extractFileFromTarGzip(buffer: Buffer, file: string): Buffer {
   try {
     buffer = zlib.unzipSync(buffer);
   } catch (err) {
-    throw new Error(`Invalid gzip data in archive: ${err && err.message || err}`);
+    throw new Error(
+      `Invalid gzip data in archive: ${(err && err.message) || err}`
+    );
   }
-  let str = (i: number, n: number) => String.fromCharCode(...buffer.subarray(i, i + n)).replace(/\0.*$/, '');
+  let str = (i: number, n: number) =>
+    String.fromCharCode(...buffer.subarray(i, i + n)).replace(/\0.*$/, "");
   let offset = 0;
   file = `package/${file}`;
   while (offset < buffer.length) {
@@ -165,18 +194,25 @@ function extractFileFromTarGzip(buffer: Buffer, file: string): Buffer {
 }
 
 function installUsingNPM(name: string, file: string): Buffer {
-  const installDir = path.join(os.tmpdir(), 'esbuild-' + Math.random().toString(36).slice(2));
+  const installDir = path.join(
+    os.tmpdir(),
+    "esbuild-" + Math.random().toString(36).slice(2)
+  );
   fs.mkdirSync(installDir, { recursive: true });
-  fs.writeFileSync(path.join(installDir, 'package.json'), '{}');
+  fs.writeFileSync(path.join(installDir, "package.json"), "{}");
 
   // Erase "npm_config_global" so that "npm install --global esbuild" works.
   // Otherwise this nested "npm install" will also be global, and the install
   // will deadlock waiting for the global installation lock.
   const env = { ...process.env, npm_config_global: undefined };
 
-  child_process.execSync(`npm install --loglevel=error --prefer-offline --no-audit --progress=false ${name}@${version}`,
-    { cwd: installDir, stdio: 'pipe', env });
-  const buffer = fs.readFileSync(path.join(installDir, 'node_modules', name, file));
+  child_process.execSync(
+    `npm install --loglevel=error --prefer-offline --no-audit --progress=false ${name}@${version}`,
+    { cwd: installDir, stdio: "pipe", env }
+  );
+  const buffer = fs.readFileSync(
+    path.join(installDir, "node_modules", name, file)
+  );
   try {
     removeRecursive(installDir);
   } catch (e) {
@@ -226,14 +262,22 @@ function installDirectly(name: string) {
     // attempt to avoid problems with package managers like pnpm which will
     // usually turn each file into a hard link. We don't want to mutate the
     // hard-linked file which may be shared with other files.
-    const tempBinPath = binPath + '__';
-    installBinaryFromPackage(name, 'bin/esbuild', tempBinPath)
+    const tempBinPath = binPath + "__";
+    installBinaryFromPackage(name, "bin/esbuild", tempBinPath)
       .then(() => fs.renameSync(tempBinPath, binPath))
-      .catch(e => setImmediate(() => { throw e; }));
+      .catch((e) =>
+        setImmediate(() => {
+          throw e;
+        })
+      );
   }
 }
 
-function installWithWrapper(name: string, fromPath: string, toPath: string): void {
+function installWithWrapper(
+  name: string,
+  fromPath: string,
+  toPath: string
+): void {
   fs.writeFileSync(
     binPath,
     `#!/usr/bin/env node
@@ -242,14 +286,18 @@ const esbuild_exe = path.join(__dirname, '..', ${JSON.stringify(toPath)});
 const child_process = require('child_process');
 const { status } = child_process.spawnSync(esbuild_exe, process.argv.slice(2), { stdio: 'inherit' });
 process.exitCode = status === null ? 1 : status;
-`);
+`
+  );
   const absToPath = path.join(__dirname, toPath);
   if (process.env.ESBUILD_BINARY_PATH) {
     fs.copyFileSync(process.env.ESBUILD_BINARY_PATH, absToPath);
     validateBinaryVersion(absToPath);
   } else {
-    installBinaryFromPackage(name, fromPath, absToPath)
-      .catch(e => setImmediate(() => { throw e; }));
+    installBinaryFromPackage(name, fromPath, absToPath).catch((e) =>
+      setImmediate(() => {
+        throw e;
+      })
+    );
   }
 }
 
@@ -276,21 +324,21 @@ function installOnWindows(name: string): void {
 
 const platformKey = `${process.platform} ${os.arch()} ${os.endianness()}`;
 const knownWindowsPackages: Record<string, string> = {
-  'win32 ia32 LE': 'esbuild-windows-32',
-  'win32 x64 LE': 'esbuild-windows-64',
+  "win32 ia32 LE": "@goodforonefare/esbuild-windows-32",
+  "win32 x64 LE": "@goodforonefare/esbuild-windows-64",
 };
 const knownUnixlikePackages: Record<string, string> = {
-  'android arm64 LE': 'esbuild-android-arm64',
-  'darwin arm64 LE': 'esbuild-darwin-arm64',
-  'darwin x64 LE': 'esbuild-darwin-64',
-  'freebsd arm64 LE': 'esbuild-freebsd-arm64',
-  'freebsd x64 LE': 'esbuild-freebsd-64',
-  'linux arm LE': 'esbuild-linux-arm',
-  'linux arm64 LE': 'esbuild-linux-arm64',
-  'linux ia32 LE': 'esbuild-linux-32',
-  'linux mips64el LE': 'esbuild-linux-mips64le',
-  'linux ppc64 LE': 'esbuild-linux-ppc64le',
-  'linux x64 LE': 'esbuild-linux-64',
+  "android arm64 LE": "@goodforonefare/esbuild-android-arm64",
+  "darwin arm64 LE": "@goodforonefare/esbuild-darwin-arm64",
+  "darwin x64 LE": "@goodforonefare/esbuild-darwin-64",
+  "freebsd arm64 LE": "@goodforonefare/esbuild-freebsd-arm64",
+  "freebsd x64 LE": "@goodforonefare/esbuild-freebsd-64",
+  "linux arm LE": "@goodforonefare/esbuild-linux-arm",
+  "linux arm64 LE": "@goodforonefare/esbuild-linux-arm64",
+  "linux ia32 LE": "@goodforonefare/esbuild-linux-32",
+  "linux mips64el LE": "@goodforonefare/esbuild-linux-mips64le",
+  "linux ppc64 LE": "@goodforonefare/esbuild-linux-ppc64le",
+  "linux x64 LE": "@goodforonefare/esbuild-linux-64",
 };
 
 // Pick a package to install

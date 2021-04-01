@@ -1,6 +1,6 @@
 {
   "name": "@goodforonefare/esbuild",
-  "version": "0.11.2",
+  "version": "0.11.2-translations-hot-reload",
   "description": "An extremely fast JavaScript bundler and minifier.",
   "repository": "https://github.com/evanw/esbuild",
   "scripts": {

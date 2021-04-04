@@ -186,8 +186,6 @@ publish-all: cmd/esbuild/version.go test-prepublish
 		publish-freebsd-arm64 \
 		publish-darwin \
 		publish-darwin-arm64
-	# @echo Enter one-time password:
-	# @read OTP && OTP="$$OTP" make -j4 \
 	make -j4 \
 		publish-android-arm64 \
 		publish-linux \

@@ -180,7 +180,17 @@ func newLinkerContext(
 	reachableFiles []uint32,
 	dataForSourceMaps func() []dataForSourceMap,
 ) linkerContext {
+	start2 := time.Now()
 	log = wrappedLog(log)
+
+	g := graph.MakeLinkerGraph(
+		inputFiles,
+		reachableFiles,
+		entryPoints,
+		options.CodeSplitting,
+	)
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("newLinkerContext - MakeLinkerGraph done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	c := linkerContext{
 		options:           options,
@@ -188,13 +198,11 @@ func newLinkerContext(
 		fs:                fs,
 		res:               res,
 		dataForSourceMaps: dataForSourceMaps,
-		graph: graph.MakeLinkerGraph(
-			inputFiles,
-			reachableFiles,
-			entryPoints,
-			options.CodeSplitting,
-		),
+		graph: g,
 	}
+
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("newLinkerContext - linkerContext done! (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	for _, entryPoint := range entryPoints {
 		if repr, ok := c.graph.Files[entryPoint.SourceIndex].InputFile.Repr.(*graph.JSRepr); ok {
@@ -218,12 +226,18 @@ func newLinkerContext(
 		}
 	}
 
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("newLinkerContext - entrypoints done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
 	// Allocate a new unbound symbol called "module" in case we need it later
 	if c.options.OutputFormat == config.FormatCommonJS {
 		c.unboundModuleRef = c.graph.GenerateNewSymbol(runtime.SourceIndex, js_ast.SymbolUnbound, "module")
 	} else {
 		c.unboundModuleRef = js_ast.InvalidRef
 	}
+
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("newLinkerContext - done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	return c
 }
@@ -243,10 +257,14 @@ func (c *linkerContext) generateUniqueKeyPrefix() bool {
 }
 
 func (c *linkerContext) link() []graph.OutputFile {
+	start2 := time.Now();
+
 	if !c.generateUniqueKeyPrefix() {
 		return nil
 	}
 	c.scanImportsAndExports()
+	c.log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("linker.link - scanImportsAndExports done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	// Stop now if there were errors
 	if c.log.HasErrors() {
@@ -254,21 +272,40 @@ func (c *linkerContext) link() []graph.OutputFile {
 	}
 
 	c.treeShakingAndCodeSplitting()
+	c.log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("linker.link - treeShakingAndCodeSplitting done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	if c.options.Mode == config.ModePassThrough {
 		for _, entryPoint := range c.graph.EntryPoints() {
 			c.preventExportsFromBeingRenamed(entryPoint.SourceIndex)
 		}
 	}
+	c.log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("linker.link - preventExportsFromBeingRenamed done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	chunks := c.computeChunks()
+	c.log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("linker.link - computeChunks done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
 	c.computeCrossChunkDependencies(chunks)
+	c.log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("linker.link - computeCrossChunkDependencies done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	// Make sure calls to "js_ast.FollowSymbols()" in parallel goroutines after this
 	// won't hit concurrent map mutation hazards
 	js_ast.FollowAllSymbols(c.graph.Symbols)
+	c.log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("linker.link - FollowAllSymbols done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
-	return c.generateChunksInParallel(chunks)
+	println(fmt.Sprintf("@@chunks %d", len(chunks)))
+	// for i, c := range chunks {
+	// 	println(fmt.Sprintf("@@chunk - %d - %s - %s ", i, c.isEntryPoint, c.finalRelPath))
+	// }
+	result := c.generateChunksInParallel(chunks)
+	c.log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("linker.link - generateChunksInParallel done! (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
+	return result;
 }
 
 // Currently the automatic chunk generation algorithm should by construction

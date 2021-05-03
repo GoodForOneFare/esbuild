@@ -662,7 +662,7 @@ func buildImpl(buildOpts BuildOptions) internalBuildResult {
 		IncludeSource: true,
 		MessageLimit:  buildOpts.LogLimit,
 		Color:         validateColor(buildOpts.Color),
-		LogLevel:      validateLogLevel(buildOpts.LogLevel),
+		LogLevel:      logger.LevelDebug,
 	}
 	log := logger.NewStderrLog(logOptions)
 
@@ -1297,6 +1297,7 @@ func transformImpl(input string, transformOpts TransformOptions) TransformResult
 	var code []byte
 	var sourceMap []byte
 
+	println("LOL@@@")
 	// Unpack the JavaScript file and the source map file
 	if len(results) == 1 {
 		code = results[0].Contents

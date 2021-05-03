@@ -1014,6 +1014,7 @@ func ScanBundle(
 	options config.Options,
 ) Bundle {
 	start := time.Now()
+	start2 := time.Now()
 	if log.Debug {
 		log.AddDebug(nil, logger.Loc{}, "Started the scan phase")
 	}
@@ -1030,6 +1031,8 @@ func ScanBundle(
 		visited:       make(map[logger.Path]uint32),
 		resultChannel: make(chan parseResult),
 	}
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Created scanner (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	// Always start by parsing the runtime file
 	s.results = append(s.results, parseResult{})
@@ -1048,9 +1051,17 @@ func ScanBundle(
 	}()
 
 	s.preprocessInjectedFiles()
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("s.preprocessInjectedFiles done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
 	entryPointMeta := s.addEntryPoints(entryPoints)
 	s.scanAllDependencies()
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("s.scanAllDependencies done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
 	files := s.processScannedFiles()
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("s.processScannedFiles done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	if log.Debug {
 		log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Ended the scan phase (%dms)", time.Since(start).Milliseconds()))
@@ -1539,16 +1550,30 @@ func lowestCommonAncestorDirectory(fs fs.FS, entryPoints []graph.EntryPoint) str
 
 func (s *scanner) scanAllDependencies() {
 	// Continue scanning until all dependencies have been discovered
+	start2 := time.Now();
+	scan := int64(0)
+	parsing := int64(0)
+	external := int64(0)
+	importRecords := int64(0)
+	waitResult := int64(0)
+
+	scanStart := time.Now()
 	for s.remaining > 0 {
+		scan = scan + time.Since(scanStart).Milliseconds()
+		waitStart := time.Now()
 		result := <-s.resultChannel
 		s.remaining--
+		waitResult = waitResult + time.Since(waitStart).Milliseconds();
 		if !result.ok {
 			continue
 		}
 
 		// Don't try to resolve paths if we're not bundling
 		if s.options.Mode == config.ModeBundle {
+			importStart := time.Now()
 			records := *result.file.inputFile.Repr.ImportRecords()
+			importRecords = importRecords + (time.Since(importStart).Milliseconds())
+
 			for importRecordIndex := range records {
 				record := &records[importRecordIndex]
 
@@ -1560,11 +1585,14 @@ func (s *scanner) scanAllDependencies() {
 
 				path := resolveResult.PathPair.Primary
 				if !resolveResult.IsExternal {
+					startParse := time.Now()
 					// Handle a path within the bundle
 					sourceIndex := s.maybeParseFile(*resolveResult, s.res.PrettyPath(path),
 						&result.file.inputFile.Source, record.Range, resolveResult.PluginData, inputKindNormal, nil)
 					record.SourceIndex = ast.MakeIndex32(sourceIndex)
+					parsing = parsing + (time.Since(startParse).Milliseconds())
 				} else {
+					startExternal := time.Now()
 					// If the path to the external module is relative to the source
 					// file, rewrite the path to be relative to the working directory
 					if path.Namespace == "file" {
@@ -1581,12 +1609,21 @@ func (s *scanner) scanAllDependencies() {
 					} else {
 						record.Path = path
 					}
+					external = external + (time.Since(startExternal).Milliseconds())
 				}
 			}
 		}
 
 		s.results[result.file.inputFile.Source.Index] = result
+		scanStart = time.Now()
 	}
+
+	println(fmt.Sprintf("bundler.scanAllDependencies - scan %d", scan))
+	println(fmt.Sprintf("bundler.scanAllDependencies - parsing %d", parsing))
+	println(fmt.Sprintf("bundler.scanAllDependencies - external %d", external))
+	println(fmt.Sprintf("bundler.scanAllDependencies - importRecords %d", importRecords))
+	println(fmt.Sprintf("bundler.scanAllDependencies - waitResult %d", waitResult))
+	println(fmt.Sprintf("bundler.scanAllDependencies - done %d", time.Since(start2).Milliseconds()))
 }
 
 func (s *scanner) processScannedFiles() []scannerFile {
@@ -1907,6 +1944,7 @@ func applyOptionDefaults(options *config.Options) {
 
 func (b *Bundle) Compile(log logger.Log, options config.Options) ([]graph.OutputFile, string) {
 	start := time.Now()
+	start2 := time.Now()
 	if log.Debug {
 		log.AddDebug(nil, logger.Loc{}, "Started the compile phase")
 	}
@@ -1923,17 +1961,31 @@ func (b *Bundle) Compile(log logger.Log, options config.Options) ([]graph.Output
 		files[i] = file.inputFile
 	}
 
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - init (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
 	// Get the base path from the options or choose the lowest common ancestor of all entry points
 	allReachableFiles := findReachableFiles(files, b.entryPoints)
 
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - findReachableFiles done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
 	// Compute source map data in parallel with linking
 	dataForSourceMaps := b.computeDataForSourceMapsInParallel(&options, allReachableFiles)
+
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - computeDataForSourceMapsInParallel done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
 
 	var resultGroups [][]graph.OutputFile
 	if options.CodeSplitting {
 		// If code splitting is enabled, link all entry points together
 		c := newLinkerContext(&options, log, b.fs, b.res, files, b.entryPoints, allReachableFiles, dataForSourceMaps)
+		log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - newLinkerContext done (%dms)", time.Since(start2).Milliseconds()))
+		start2 = time.Now()
 		resultGroups = [][]graph.OutputFile{c.link()}
+
+		log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - linking done (%dms)", time.Since(start2).Milliseconds()))
+		start2 = time.Now()
 	} else {
 		// Otherwise, link each entry point with the runtime file separately
 		waitGroup := sync.WaitGroup{}
@@ -1949,6 +2001,9 @@ func (b *Bundle) Compile(log logger.Log, options config.Options) ([]graph.Output
 			}(i, entryPoint)
 		}
 		waitGroup.Wait()
+
+		log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - non-split done (%dms)", time.Since(start2).Milliseconds()))
+		start2 = time.Now()
 	}
 
 	// Join the results in entry point order for determinism
@@ -1957,11 +2012,18 @@ func (b *Bundle) Compile(log logger.Log, options config.Options) ([]graph.Output
 		outputFiles = append(outputFiles, group...)
 	}
 
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - join results done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
 	// Also generate the metadata file if necessary
 	var metafileJSON string
 	if options.NeedsMetafile {
 		metafileJSON = b.generateMetadataJSON(outputFiles, allReachableFiles, options.ASCIIOnly)
+
+		log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - generateMetadataJSON done (%dms)", time.Since(start2).Milliseconds()))
+		start2 = time.Now()
 	}
+
 
 	if !options.WriteToStdout {
 		// Make sure an output file never overwrites an input file
@@ -2013,6 +2075,9 @@ func (b *Bundle) Compile(log logger.Log, options config.Options) ([]graph.Output
 			log.AddError(nil, logger.Loc{}, "Two output files share the same path but have different contents: "+outputPath)
 		}
 		outputFiles = outputFiles[:end]
+
+		log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Compile - outputFiles done (%dms)", time.Since(start2).Milliseconds()))
+		start2 = time.Now()
 	}
 
 	if log.Debug {

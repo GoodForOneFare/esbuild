@@ -265,9 +265,9 @@ func NewResolver(fs fs.FS, log logger.Log, caches *cache.CacheSet, options confi
 func (rr *resolver) Resolve(sourceDir string, importPath string, kind ast.ImportKind) (*ResolveResult, DebugMeta) {
 	r := resolverQuery{resolver: rr}
 	if r.log.Debug {
-		r.debugLogs = &debugLogs{what: fmt.Sprintf(
-			"Resolving import %q in directory %q of type %q",
-			importPath, sourceDir, kind.StringForMetafile())}
+		// r.debugLogs = &debugLogs{what: fmt.Sprintf(
+		// 	"Resolving import %q in directory %q of type %q",
+		// 	importPath, sourceDir, kind.StringForMetafile())}
 	}
 
 	// Certain types of URLs default to being external for convenience
@@ -285,9 +285,9 @@ func (rr *resolver) Resolve(sourceDir string, importPath string, kind ast.Import
 		// "background: url(//example.com/images/image.png);"
 		strings.HasPrefix(importPath, "//") {
 
-		if r.debugLogs != nil {
-			r.debugLogs.addNote("Marking this path as implicitly external")
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote("Marking this path as implicitly external")
+		// }
 
 		r.flushDebugLogs()
 		return &ResolveResult{
@@ -300,9 +300,9 @@ func (rr *resolver) Resolve(sourceDir string, importPath string, kind ast.Import
 		// "import 'data:text/javascript,console.log(123)';"
 		// "@import 'data:text/css,body{background:white}';"
 		if parsed.DecodeMIMEType() != MIMETypeUnsupported {
-			if r.debugLogs != nil {
-				r.debugLogs.addNote("Putting this path in the \"dataurl\" namespace")
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote("Putting this path in the \"dataurl\" namespace")
+			// }
 			r.flushDebugLogs()
 			return &ResolveResult{
 				PathPair: PathPair{Primary: logger.Path{Text: importPath, Namespace: "dataurl"}},
@@ -310,9 +310,9 @@ func (rr *resolver) Resolve(sourceDir string, importPath string, kind ast.Import
 		}
 
 		// "background: url(data:image/png;base64,iVBORw0KGgo=);"
-		if r.debugLogs != nil {
-			r.debugLogs.addNote("Marking this data URL as external")
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote("Marking this data URL as external")
+		// }
 		r.flushDebugLogs()
 		return &ResolveResult{
 			PathPair:   PathPair{Primary: logger.Path{Text: importPath}},
@@ -323,9 +323,9 @@ func (rr *resolver) Resolve(sourceDir string, importPath string, kind ast.Import
 	// Fail now if there is no directory to resolve in. This can happen for
 	// virtual modules (e.g. stdin) if a resolve directory is not specified.
 	if sourceDir == "" {
-		if r.debugLogs != nil {
-			r.debugLogs.addNote("Cannot resolve this path without a directory")
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote("Cannot resolve this path without a directory")
+		// }
 		r.flushDebugLogs()
 		return nil, DebugMeta{}
 	}
@@ -341,9 +341,9 @@ func (rr *resolver) Resolve(sourceDir string, importPath string, kind ast.Import
 			r.flushDebugLogs()
 			return nil, debug
 		}
-		if r.debugLogs != nil {
-			r.debugLogs.addNote(fmt.Sprintf("Retrying resolution after removing the suffix %q", importPath[suffix:]))
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote(fmt.Sprintf("Retrying resolution after removing the suffix %q", importPath[suffix:]))
+		// }
 		if result2, debug2 := r.resolveWithoutSymlinks(sourceDir, importPath[:suffix], kind); result2 == nil {
 			r.flushDebugLogs()
 			return nil, debug
@@ -376,9 +376,9 @@ func (r resolverQuery) isExternalPattern(path string) bool {
 
 func (rr *resolver) ResolveAbs(absPath string) *ResolveResult {
 	r := resolverQuery{resolver: rr}
-	if r.log.Debug {
-		r.debugLogs = &debugLogs{what: fmt.Sprintf("Getting metadata for absolute path %s", absPath)}
-	}
+	// if r.log.Debug {
+	// 	r.debugLogs = &debugLogs{what: fmt.Sprintf("Getting metadata for absolute path %s", absPath)}
+	// }
 
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -392,9 +392,9 @@ func (rr *resolver) ResolveAbs(absPath string) *ResolveResult {
 
 func (rr *resolver) ProbeResolvePackageAsRelative(sourceDir string, importPath string, kind ast.ImportKind) *ResolveResult {
 	r := resolverQuery{resolver: rr}
-	if r.log.Debug {
-		r.debugLogs = &debugLogs{what: fmt.Sprintf("Probing for relative import %q in directory %q", importPath, sourceDir)}
-	}
+	// if r.log.Debug {
+	// 	r.debugLogs = &debugLogs{what: fmt.Sprintf("Probing for relative import %q in directory %q", importPath, sourceDir)}
+	// }
 
 	absPath := r.fs.Join(sourceDir, importPath)
 
@@ -479,10 +479,10 @@ func (r resolverQuery) finalizeResolve(result *ResolveResult) {
 									}
 								}
 								if !hasSideEffects {
-									if r.debugLogs != nil {
-										r.debugLogs.addNote(fmt.Sprintf("Marking this file as having no side effects due to %q",
-											info.packageJSON.source.KeyPath.Text))
-									}
+									// if r.debugLogs != nil {
+									// 	r.debugLogs.addNote(fmt.Sprintf("Marking this file as having no side effects due to %q",
+									// 		info.packageJSON.source.KeyPath.Text))
+									// }
 									result.PrimarySideEffectsData = info.packageJSON.sideEffectsData
 								}
 							}
@@ -501,36 +501,36 @@ func (r resolverQuery) finalizeResolve(result *ResolveResult) {
 					result.UseDefineForClassFieldsTS = dirInfo.tsConfigJSON.UseDefineForClassFields
 					result.PreserveUnusedImportsTS = dirInfo.tsConfigJSON.PreserveImportsNotUsedAsValues
 
-					if r.debugLogs != nil {
-						r.debugLogs.addNote(fmt.Sprintf("This import is under the effect of %q",
-							dirInfo.tsConfigJSON.AbsPath))
-						if result.JSXFactory != nil {
-							r.debugLogs.addNote(fmt.Sprintf("\"jsxFactory\" is %q due to %q",
-								strings.Join(result.JSXFactory, "."),
-								dirInfo.tsConfigJSON.AbsPath))
-						}
-						if result.JSXFragment != nil {
-							r.debugLogs.addNote(fmt.Sprintf("\"jsxFragment\" is %q due to %q",
-								strings.Join(result.JSXFragment, "."),
-								dirInfo.tsConfigJSON.AbsPath))
-						}
-					}
+					// if r.debugLogs != nil {
+					// 	r.debugLogs.addNote(fmt.Sprintf("This import is under the effect of %q",
+					// 		dirInfo.tsConfigJSON.AbsPath))
+					// 	if result.JSXFactory != nil {
+					// 		r.debugLogs.addNote(fmt.Sprintf("\"jsxFactory\" is %q due to %q",
+					// 			strings.Join(result.JSXFactory, "."),
+					// 			dirInfo.tsConfigJSON.AbsPath))
+					// 	}
+					// 	if result.JSXFragment != nil {
+					// 		r.debugLogs.addNote(fmt.Sprintf("\"jsxFragment\" is %q due to %q",
+					// 			strings.Join(result.JSXFragment, "."),
+					// 			dirInfo.tsConfigJSON.AbsPath))
+					// 	}
+					// }
 				}
 
 				if !r.options.PreserveSymlinks {
 					if entry, _ := dirInfo.entries.Get(base); entry != nil {
 						if symlink := entry.Symlink(r.fs); symlink != "" {
 							// Is this entry itself a symlink?
-							if r.debugLogs != nil {
-								r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path.Text, symlink))
-							}
+							// if r.debugLogs != nil {
+							// 	r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path.Text, symlink))
+							// }
 							path.Text = symlink
 						} else if dirInfo.absRealPath != "" {
 							// Is there at least one parent directory with a symlink?
 							symlink := r.fs.Join(dirInfo.absRealPath, base)
-							if r.debugLogs != nil {
-								r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path.Text, symlink))
-							}
+							// if r.debugLogs != nil {
+							// 	r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path.Text, symlink))
+							// }
 							path.Text = symlink
 						}
 					}
@@ -539,12 +539,12 @@ func (r resolverQuery) finalizeResolve(result *ResolveResult) {
 		}
 	}
 
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Primary path is %q in namespace %q", result.PathPair.Primary.Text, result.PathPair.Primary.Namespace))
-		if result.PathPair.HasSecondary() {
-			r.debugLogs.addNote(fmt.Sprintf("Secondary path is %q in namespace %q", result.PathPair.Secondary.Text, result.PathPair.Secondary.Namespace))
-		}
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Primary path is %q in namespace %q", result.PathPair.Primary.Text, result.PathPair.Primary.Namespace))
+	// 	if result.PathPair.HasSecondary() {
+	// 		r.debugLogs.addNote(fmt.Sprintf("Secondary path is %q in namespace %q", result.PathPair.Secondary.Text, result.PathPair.Secondary.Namespace))
+	// 	}
+	// }
 }
 
 func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath string, kind ast.ImportKind) (*ResolveResult, DebugMeta) {
@@ -562,9 +562,9 @@ func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath strin
 	// Treating these paths as absolute paths on all platforms means Windows
 	// users will not be able to accidentally make use of these paths.
 	if strings.HasPrefix(importPath, "/") || r.fs.IsAbs(importPath) {
-		if r.debugLogs != nil {
-			r.debugLogs.addNote(fmt.Sprintf("The import %q is being treated as an absolute path", importPath))
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote(fmt.Sprintf("The import %q is being treated as an absolute path", importPath))
+		// }
 
 		// First, check path overrides from the nearest enclosing TypeScript "tsconfig.json" file
 		if dirInfo := r.dirInfoCached(sourceDir); dirInfo != nil && dirInfo.tsConfigJSON != nil && dirInfo.tsConfigJSON.Paths != nil {
@@ -578,9 +578,9 @@ func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath strin
 			// been marked as an external module, mark it as *not* an absolute path.
 			// That way we preserve the literal text in the output and don't generate
 			// a relative path from the output directory to that path.
-			if r.debugLogs != nil {
-				r.debugLogs.addNote(fmt.Sprintf("The path %q was marked as external by the user", importPath))
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote(fmt.Sprintf("The path %q was marked as external by the user", importPath))
+			// }
 			return &ResolveResult{PathPair: PathPair{Primary: logger.Path{Text: importPath}}, IsExternal: true}, DebugMeta{}
 		}
 
@@ -602,9 +602,9 @@ func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath strin
 
 		// Check for external packages first
 		if r.options.ExternalModules.AbsPaths != nil && r.options.ExternalModules.AbsPaths[absPath] {
-			if r.debugLogs != nil {
-				r.debugLogs.addNote(fmt.Sprintf("The path %q was marked as external by the user", absPath))
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote(fmt.Sprintf("The path %q was marked as external by the user", absPath))
+			// }
 			return &ResolveResult{PathPair: PathPair{Primary: logger.Path{Text: absPath, Namespace: "file"}}, IsExternal: true}, DebugMeta{}
 		}
 
@@ -614,14 +614,14 @@ func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath strin
 			if packageJSON := importDirInfo.enclosingBrowserScope.packageJSON; packageJSON.browserNonPackageMap != nil {
 				if remapped, ok := packageJSON.browserNonPackageMap[absPath]; ok {
 					if remapped == nil {
-						if r.debugLogs != nil {
-							r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q", absPath, packageJSON.source.KeyPath.Text))
-						}
+						// if r.debugLogs != nil {
+						// 	r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q", absPath, packageJSON.source.KeyPath.Text))
+						// }
 						return &ResolveResult{PathPair: PathPair{Primary: logger.Path{Text: absPath, Namespace: "file", Flags: logger.PathDisabled}}}, DebugMeta{}
 					}
-					if r.debugLogs != nil {
-						r.debugLogs.addNote(fmt.Sprintf("The path %q is present in the \"browser\" map in %q", absPath, packageJSON.source.KeyPath.Text))
-					}
+					// if r.debugLogs != nil {
+					// 	r.debugLogs.addNote(fmt.Sprintf("The path %q is present in the \"browser\" map in %q", absPath, packageJSON.source.KeyPath.Text))
+					// }
 					if remappedResult, ok, diffCase, _ := r.resolveWithoutRemapping(importDirInfo.enclosingBrowserScope, *remapped, kind); ok {
 						result = ResolveResult{PathPair: remappedResult, DifferentCase: diffCase}
 						checkRelative = false
@@ -647,9 +647,9 @@ func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath strin
 			query := importPath
 			for {
 				if r.options.ExternalModules.NodeModules[query] {
-					if r.debugLogs != nil {
-						r.debugLogs.addNote(fmt.Sprintf("The path %q was marked as external by the user", query))
-					}
+					// if r.debugLogs != nil {
+					// 	r.debugLogs.addNote(fmt.Sprintf("The path %q was marked as external by the user", query))
+					// }
 					return &ResolveResult{PathPair: PathPair{Primary: logger.Path{Text: importPath}}, IsExternal: true}, DebugMeta{}
 				}
 
@@ -681,23 +681,23 @@ func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath strin
 							if absolute.HasSecondary() {
 								absolute.Secondary = logger.Path{Text: absolute.Secondary.Text, Namespace: "file", Flags: logger.PathDisabled}
 							}
-							if r.debugLogs != nil {
-								r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q",
-									absolute.Primary.Text, packageJSON.source.KeyPath.Text))
-							}
+							// if r.debugLogs != nil {
+							// 	r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q",
+							// 		absolute.Primary.Text, packageJSON.source.KeyPath.Text))
+							// }
 							return &ResolveResult{PathPair: absolute, DifferentCase: diffCase}, DebugMeta{}
 						} else {
-							if r.debugLogs != nil {
-								r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q",
-									importPath, packageJSON.source.KeyPath.Text))
-							}
+							// if r.debugLogs != nil {
+							// 	r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q",
+							// 		importPath, packageJSON.source.KeyPath.Text))
+							// }
 							return &ResolveResult{PathPair: PathPair{Primary: logger.Path{Text: importPath, Flags: logger.PathDisabled}}, DifferentCase: diffCase}, DebugMeta{}
 						}
 					}
-					if r.debugLogs != nil {
-						r.debugLogs.addNote(fmt.Sprintf("The path %q is present in the \"browser\" map in %q",
-							importPath, packageJSON.source.KeyPath.Text))
-					}
+					// if r.debugLogs != nil {
+					// 	r.debugLogs.addNote(fmt.Sprintf("The path %q is present in the \"browser\" map in %q",
+					// 		importPath, packageJSON.source.KeyPath.Text))
+					// }
 
 					// "browser": {"module": "./some-file"}
 					// "browser": {"module": "another-module"}
@@ -726,16 +726,16 @@ func (r resolverQuery) resolveWithoutSymlinks(sourceDir string, importPath strin
 			if packageJSON.browserNonPackageMap != nil {
 				if remapped, ok := packageJSON.browserNonPackageMap[path.Text]; ok {
 					if remapped == nil {
-						if r.debugLogs != nil {
-							r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q",
-								path.Text, packageJSON.source.KeyPath.Text))
-						}
+						// if r.debugLogs != nil {
+						// 	r.debugLogs.addNote(fmt.Sprintf("The path %q is disabled due to the \"browser\" map in %q",
+						// 		path.Text, packageJSON.source.KeyPath.Text))
+						// }
 						path.Flags |= logger.PathDisabled
 					} else {
-						if r.debugLogs != nil {
-							r.debugLogs.addNote(fmt.Sprintf("The path %q is present in the \"browser\" map in %q",
-								path.Text, packageJSON.source.KeyPath.Text))
-						}
+						// if r.debugLogs != nil {
+						// 	r.debugLogs.addNote(fmt.Sprintf("The path %q is present in the \"browser\" map in %q",
+						// 		path.Text, packageJSON.source.KeyPath.Text))
+						// }
 						if remappedResult, ok, _, _ := r.resolveWithoutRemapping(resultDirInfo.enclosingBrowserScope, *remapped, kind); ok {
 							*path = remappedResult.Primary
 						} else {
@@ -817,18 +817,18 @@ func (r resolverQuery) dirInfoCached(path string) *dirInfo {
 		r.dirCache[path] = cached
 	}
 
-	if r.debugLogs != nil {
-		if cached == nil {
-			r.debugLogs.addNote(fmt.Sprintf("Failed to read directory %q", path))
-		} else {
-			count := cached.entries.Len()
-			entries := "entries"
-			if count == 1 {
-				entries = "entry"
-			}
-			r.debugLogs.addNote(fmt.Sprintf("Read %d %s for directory %q", count, entries, path))
-		}
-	}
+	// if r.debugLogs != nil {
+	// 	if cached == nil {
+	// 		r.debugLogs.addNote(fmt.Sprintf("Failed to read directory %q", path))
+	// 	} else {
+	// 		count := cached.entries.Len()
+	// 		entries := "entries"
+	// 		if count == 1 {
+	// 			entries = "entry"
+	// 		}
+	// 		r.debugLogs.addNote(fmt.Sprintf("Read %d %s for directory %q", count, entries, path))
+	// 	}
+	// }
 
 	return cached
 }
@@ -850,14 +850,14 @@ func (r resolverQuery) parseTSConfig(file string, visited map[string]bool) (*TSC
 
 	contents, err, originalError := r.caches.FSCache.ReadFile(r.fs, file)
 	if r.debugLogs != nil && originalError != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Failed to read file %q: %s", file, originalError.Error()))
+	// 	r.debugLogs.addNote(fmt.Sprintf("Failed to read file %q: %s", file, originalError.Error()))
 	}
 	if err != nil {
 		return nil, err
 	}
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("The file %q exists", file))
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("The file %q exists", file))
+	// }
 
 	keyPath := logger.Path{Text: file, Namespace: "file"}
 	source := logger.Source{
@@ -977,7 +977,7 @@ func (r resolverQuery) dirInfoUncached(path string) *dirInfo {
 		err = nil
 	}
 	if r.debugLogs != nil && originalError != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Failed to read directory %q: %s", path, originalError.Error()))
+	// 	r.debugLogs.addNote(fmt.Sprintf("Failed to read directory %q: %s", path, originalError.Error()))
 	}
 	if err != nil {
 		// Ignore "ENOTDIR" here so that calling "ReadDirectory" on a file behaves
@@ -1016,15 +1016,15 @@ func (r resolverQuery) dirInfoUncached(path string) *dirInfo {
 		if !r.options.PreserveSymlinks {
 			if entry, _ := parentInfo.entries.Get(base); entry != nil {
 				if symlink := entry.Symlink(r.fs); symlink != "" {
-					if r.debugLogs != nil {
-						r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path, symlink))
-					}
+					// if r.debugLogs != nil {
+					// 	r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path, symlink))
+					// }
 					info.absRealPath = symlink
 				} else if parentInfo.absRealPath != "" {
 					symlink := r.fs.Join(parentInfo.absRealPath, base)
-					if r.debugLogs != nil {
-						r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path, symlink))
-					}
+					// if r.debugLogs != nil {
+					// 	r.debugLogs.addNote(fmt.Sprintf("Resolved symlink %q to %q", path, symlink))
+					// }
 					info.absRealPath = symlink
 				}
 			}
@@ -1084,15 +1084,15 @@ func (r resolverQuery) dirInfoUncached(path string) *dirInfo {
 }
 
 func (r resolverQuery) loadAsFile(path string, extensionOrder []string) (string, bool, *fs.DifferentCase) {
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Attempting to load %q as a file", path))
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Attempting to load %q as a file", path))
+	// }
 
 	// Read the directory entries once to minimize locking
 	dirPath := r.fs.Dir(path)
 	entries, err, originalError := r.fs.ReadDirectory(dirPath)
 	if r.debugLogs != nil && originalError != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Failed to read directory %q: %s", dirPath, originalError.Error()))
+	// 	r.debugLogs.addNote(fmt.Sprintf("Failed to read directory %q: %s", dirPath, originalError.Error()))
 	}
 	if err != nil {
 		if err != syscall.ENOENT {
@@ -1107,26 +1107,26 @@ func (r resolverQuery) loadAsFile(path string, extensionOrder []string) (string,
 
 	// Try the plain path without any extensions
 	if entry, diffCase := entries.Get(base); entry != nil && entry.Kind(r.fs) == fs.FileEntry {
-		if r.debugLogs != nil {
-			r.debugLogs.addNote(fmt.Sprintf("Found file %q", path))
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote(fmt.Sprintf("Found file %q", path))
+		// }
 		return path, true, diffCase
 	}
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Failed to find file %q", path))
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Failed to find file %q", path))
+	// }
 
 	// Try the path with extensions
 	for _, ext := range extensionOrder {
 		if entry, diffCase := entries.Get(base + ext); entry != nil && entry.Kind(r.fs) == fs.FileEntry {
-			if r.debugLogs != nil {
-				r.debugLogs.addNote(fmt.Sprintf("Found file %q", path+ext))
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote(fmt.Sprintf("Found file %q", path+ext))
+			// }
 			return path + ext, true, diffCase
 		}
-		if r.debugLogs != nil {
-			r.debugLogs.addNote(fmt.Sprintf("Failed to find file %q", path+ext))
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote(fmt.Sprintf("Failed to find file %q", path+ext))
+		// }
 	}
 
 	// TypeScript-specific behavior: if the extension is ".js" or ".jsx", try
@@ -1150,14 +1150,14 @@ func (r resolverQuery) loadAsFile(path string, extensionOrder []string) (string,
 		// ".tsx" even if the original extension was ".jsx".
 		for _, ext := range []string{".ts", ".tsx"} {
 			if entry, diffCase := entries.Get(base[:lastDot] + ext); entry != nil && entry.Kind(r.fs) == fs.FileEntry {
-				if r.debugLogs != nil {
-					r.debugLogs.addNote(fmt.Sprintf("Rewrote to %q", path[:len(path)-(len(base)-lastDot)]+ext))
-				}
+				// if r.debugLogs != nil {
+				// 	r.debugLogs.addNote(fmt.Sprintf("Rewrote to %q", path[:len(path)-(len(base)-lastDot)]+ext))
+				// }
 				return path[:len(path)-(len(base)-lastDot)] + ext, true, diffCase
 			}
-			if r.debugLogs != nil {
-				r.debugLogs.addNote(fmt.Sprintf("Failed to rewrite to %q", path[:len(path)-(len(base)-lastDot)]+ext))
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote(fmt.Sprintf("Failed to rewrite to %q", path[:len(path)-(len(base)-lastDot)]+ext))
+			// }
 		}
 	}
 
@@ -1172,14 +1172,14 @@ func (r resolverQuery) loadAsIndex(path string, entries fs.DirEntries) (string, 
 	for _, ext := range r.options.ExtensionOrder {
 		base := "index" + ext
 		if entry, diffCase := entries.Get(base); entry != nil && entry.Kind(r.fs) == fs.FileEntry {
-			if r.debugLogs != nil {
-				r.debugLogs.addNote(fmt.Sprintf("Found file %q", r.fs.Join(path, base)))
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote(fmt.Sprintf("Found file %q", r.fs.Join(path, base)))
+			// }
 			return r.fs.Join(path, base), true, diffCase
 		}
-		if r.debugLogs != nil {
-			r.debugLogs.addNote(fmt.Sprintf("Failed to find file %q", r.fs.Join(path, base)))
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote(fmt.Sprintf("Failed to find file %q", r.fs.Join(path, base)))
+		// }
 	}
 
 	return "", false, nil
@@ -1225,9 +1225,9 @@ func (r resolverQuery) loadAsFileOrDirectory(path string, kind ast.ImportKind) (
 	}
 
 	// Is this a directory?
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Attempting to load %q as a directory", path))
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Attempting to load %q as a directory", path))
+	// }
 	dirInfo := r.dirInfoCached(path)
 	if dirInfo == nil {
 		return PathPair{}, false, nil
@@ -1272,29 +1272,29 @@ func (r resolverQuery) loadAsFileOrDirectory(path string, kind ast.ImportKind) (
 						// both the "module" file and the "main" file in the bundle at the
 						// same time.
 						if kind != ast.ImportRequire {
-							if r.debugLogs != nil {
-								r.debugLogs.addNote(fmt.Sprintf("Resolved to %q using the \"module\" field in %q",
-									absolute, dirInfo.packageJSON.source.KeyPath.Text))
-								r.debugLogs.addNote(fmt.Sprintf("The fallback path in case of \"require\" is %q", absoluteMain))
-							}
+							// if r.debugLogs != nil {
+							// 	r.debugLogs.addNote(fmt.Sprintf("Resolved to %q using the \"module\" field in %q",
+							// 		absolute, dirInfo.packageJSON.source.KeyPath.Text))
+							// 	r.debugLogs.addNote(fmt.Sprintf("The fallback path in case of \"require\" is %q", absoluteMain))
+							// }
 							return PathPair{
 								// This is the whole point of the path pair
 								Primary:   logger.Path{Text: absolute, Namespace: "file"},
 								Secondary: logger.Path{Text: absoluteMain, Namespace: "file"},
 							}, true, nil
 						} else {
-							if r.debugLogs != nil {
-								r.debugLogs.addNote(fmt.Sprintf("Resolved to %q because of \"require\"", absoluteMain))
-							}
+							// if r.debugLogs != nil {
+							// 	r.debugLogs.addNote(fmt.Sprintf("Resolved to %q because of \"require\"", absoluteMain))
+							// }
 							return PathPair{Primary: logger.Path{Text: absoluteMain, Namespace: "file"}}, true, nil
 						}
 					}
 				}
 
-				if r.debugLogs != nil {
-					r.debugLogs.addNote(fmt.Sprintf("Resolved to %q using the %q field in %q",
-						absolute, field, dirInfo.packageJSON.source.KeyPath.Text))
-				}
+				// if r.debugLogs != nil {
+				// 	r.debugLogs.addNote(fmt.Sprintf("Resolved to %q using the %q field in %q",
+				// 		absolute, field, dirInfo.packageJSON.source.KeyPath.Text))
+				// }
 				return PathPair{Primary: logger.Path{Text: absolute, Namespace: "file"}}, true, nil
 			}
 		}
@@ -1302,9 +1302,9 @@ func (r resolverQuery) loadAsFileOrDirectory(path string, kind ast.ImportKind) (
 
 	// Return the "index.js" file
 	if dirInfo.absPathIndex != nil {
-		if r.debugLogs != nil {
-			r.debugLogs.addNote(fmt.Sprintf("Resolved to %q using the \"index\" rule", *dirInfo.absPathIndex))
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote(fmt.Sprintf("Resolved to %q using the \"index\" rule", *dirInfo.absPathIndex))
+		// }
 		return PathPair{Primary: logger.Path{Text: *dirInfo.absPathIndex, Namespace: "file"}}, true, nil
 	}
 
@@ -1314,9 +1314,9 @@ func (r resolverQuery) loadAsFileOrDirectory(path string, kind ast.ImportKind) (
 // This closely follows the behavior of "tryLoadModuleUsingPaths()" in the
 // official TypeScript compiler
 func (r resolverQuery) matchTSConfigPaths(tsConfigJSON *TSConfigJSON, path string, kind ast.ImportKind) (PathPair, bool, *fs.DifferentCase) {
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Matching %q against \"paths\" in %q", path, tsConfigJSON.AbsPath))
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Matching %q against \"paths\" in %q", path, tsConfigJSON.AbsPath))
+	// }
 
 	absBaseURL := tsConfigJSON.BaseURLForPaths
 
@@ -1327,16 +1327,16 @@ func (r resolverQuery) matchTSConfigPaths(tsConfigJSON *TSConfigJSON, path strin
 		absBaseURL = *tsConfigJSON.BaseURL
 	}
 
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Using %q as \"baseURL\"", absBaseURL))
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Using %q as \"baseURL\"", absBaseURL))
+	// }
 
 	// Check for exact matches first
 	for key, originalPaths := range tsConfigJSON.Paths {
 		if key == path {
-			if r.debugLogs != nil {
-				r.debugLogs.addNote(fmt.Sprintf("Found an exact match for %q in \"paths\"", key))
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote(fmt.Sprintf("Found an exact match for %q in \"paths\"", key))
+			// }
 			for _, originalPath := range originalPaths {
 				// Load the original path relative to the "baseUrl" from tsconfig.json
 				absoluteOriginalPath := originalPath
@@ -1386,9 +1386,9 @@ func (r resolverQuery) matchTSConfigPaths(tsConfigJSON *TSConfigJSON, path strin
 	// If there is at least one match, only consider the one with the longest
 	// prefix. This matches the behavior of the TypeScript compiler.
 	if longestMatchPrefixLength != -1 {
-		if r.debugLogs != nil {
-			r.debugLogs.addNote(fmt.Sprintf("Found a fuzzy match for %q in \"paths\"", longestMatch.prefix+"*"+longestMatch.suffix))
-		}
+		// if r.debugLogs != nil {
+		// 	r.debugLogs.addNote(fmt.Sprintf("Found a fuzzy match for %q in \"paths\"", longestMatch.prefix+"*"+longestMatch.suffix))
+		// }
 
 		for _, originalPath := range longestMatch.originalPaths {
 			// Swap out the "*" in the original path for whatever the "*" matched
@@ -1410,9 +1410,9 @@ func (r resolverQuery) matchTSConfigPaths(tsConfigJSON *TSConfigJSON, path strin
 }
 
 func (r resolverQuery) loadNodeModules(path string, kind ast.ImportKind, dirInfo *dirInfo) (PathPair, bool, *fs.DifferentCase, DebugMeta) {
-	if r.debugLogs != nil {
-		r.debugLogs.addNote(fmt.Sprintf("Searching for %q in \"node_modules\" directories starting from %q", path, dirInfo.absPath))
-	}
+	// if r.debugLogs != nil {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Searching for %q in \"node_modules\" directories starting from %q", path, dirInfo.absPath))
+	// }
 
 	// First, check path overrides from the nearest enclosing TypeScript "tsconfig.json" file
 	if dirInfo.tsConfigJSON != nil {
@@ -1433,9 +1433,9 @@ func (r resolverQuery) loadNodeModules(path string, kind ast.ImportKind, dirInfo
 	}
 
 	esmPackageName, esmPackageSubpath, esmOK := esmParsePackageName(path)
-	if r.debugLogs != nil && esmOK {
-		r.debugLogs.addNote(fmt.Sprintf("Parsed package name %q and package subpath %q", esmPackageName, esmPackageSubpath))
-	}
+	// if r.debugLogs != nil && esmOK {
+	// 	r.debugLogs.addNote(fmt.Sprintf("Parsed package name %q and package subpath %q", esmPackageName, esmPackageSubpath))
+	// }
 
 	// Then check for the package in any enclosing "node_modules" directories
 	for {
@@ -1443,18 +1443,18 @@ func (r resolverQuery) loadNodeModules(path string, kind ast.ImportKind, dirInfo
 		// don't ever want to search for "node_modules/node_modules"
 		if dirInfo.hasNodeModules {
 			absPath := r.fs.Join(dirInfo.absPath, "node_modules", path)
-			if r.debugLogs != nil {
-				r.debugLogs.addNote(fmt.Sprintf("Checking for a package in the directory %q", absPath))
-			}
+			// if r.debugLogs != nil {
+			// 	r.debugLogs.addNote(fmt.Sprintf("Checking for a package in the directory %q", absPath))
+			// }
 
 			// Check for an "exports" map in the package's package.json starting from ,dirInfo.absPath%q
 			if esmOK {
 				absPkgPath := r.fs.Join(dirInfo.absPath, "node_modules", esmPackageName)
 				if pkgDirInfo := r.dirInfoCached(absPkgPath); pkgDirInfo != nil {
 					if pkgJSON := pkgDirInfo.packageJSON; pkgJSON != nil && pkgJSON.exportsMap != nil {
-						if r.debugLogs != nil {
-							r.debugLogs.addNote(fmt.Sprintf("Checking \"exports\" map in %s", pkgJSON.source.KeyPath.Text))
-						}
+						// if r.debugLogs != nil {
+						// 	r.debugLogs.addNote(fmt.Sprintf("Checking \"exports\" map in %s", pkgJSON.source.KeyPath.Text))
+						// }
 
 						// The condition set is determined by the kind of import
 						conditions := r.esmConditionsDefault
@@ -1487,9 +1487,9 @@ func (r resolverQuery) loadNodeModules(path string, kind ast.ImportKind, dirInfo
 								} else if kind != fs.FileEntry {
 									status = peStatusModuleNotFound
 								} else {
-									if r.debugLogs != nil {
-										r.debugLogs.addNote(fmt.Sprintf("Resolved to %q", absResolvedPath))
-									}
+									// if r.debugLogs != nil {
+									// 	r.debugLogs.addNote(fmt.Sprintf("Resolved to %q", absResolvedPath))
+									// }
 									return PathPair{Primary: logger.Path{Text: absResolvedPath, Namespace: "file"}}, true, diffCase, DebugMeta{}
 								}
 

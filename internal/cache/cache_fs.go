@@ -50,3 +50,11 @@ func (c *FSCache) ReadFile(fs fs.FS, path string) (contents string, canonicalErr
 	}
 	return contents, nil, nil
 }
+
+func (c *FSCache) ClearFile(path string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	println("@@@@ClearFile?", c.entries[path] != nil)
+	delete(c.entries, path)
+}

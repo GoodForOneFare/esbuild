@@ -684,7 +684,7 @@ func buildImpl(buildOpts BuildOptions) internalBuildResult {
 		panic("Mutating \"AbsWorkingDir\" is not allowed")
 	}
 
-	internalResult := rebuildImpl(buildOpts, cache.MakeCacheSet(), plugins, logOptions, log, false /* isRebuild */)
+	internalResult := rebuildImpl(buildOpts, cache.MakeCacheSet(), plugins, logOptions, log, false /* isRebuild */, nil, nil)
 
 	// Print a summary of the generated files to stderr. Except don't do
 	// this if the terminal is already being used for something else.
@@ -750,6 +750,8 @@ func rebuildImpl(
 	logOptions logger.OutputOptions,
 	log logger.Log,
 	isRebuild bool,
+	_ *bundler.Bundle,
+	scannerPtr *bundler.Scanner,
 ) internalBuildResult {
 	// Convert and validate the buildOpts
 	realFS, err := fs.RealFS(fs.RealFSOptions{
@@ -909,9 +911,26 @@ func rebuildImpl(
 
 	// Stop now if there were errors
 	resolver := resolver.NewResolver(realFS, log, caches, options)
+	// Scan over the bundle
+	scanner, bundle := func() (bundler.Scanner, bundler.Bundle) {
+		if scannerPtr != nil {
+			scanner := *scannerPtr
+			// println("@@ATTEMPT CLEAR")
+			// bundle := *bundlePtr
+			// for _, f := range scanner.visited {
+				// println(fmt.Sprintf("@@@ff %s", f.Path.PrettyPath))
+			// }
+			// scanner.ClearVisited("/users/gord/src/github.com/shopify/web/app/foundation/frame/frame.tsx");
+			scanner.ClearVisited("/users/gord/src/github.com/shopify/web/app/sections/home/components/cardlist/cardlist.tsx");
+			// bundler.ScanBundle(log, realFS, resolver, caches, entryPoints, options, scannerPtr)
+			// return scanner, *bundlePtr
+			return bundler.ScanBundle(log, realFS, resolver, caches, entryPoints, options, scannerPtr)
+		}
+		
+		return bundler.ScanBundle(log, realFS, resolver, caches, entryPoints, options, nil)
+	}()
+
 	if !log.HasErrors() {
-		// Scan over the bundle
-		bundle := bundler.ScanBundle(log, realFS, resolver, caches, entryPoints, options)
 		watchData = realFS.WatchData()
 
 		// Stop now if there were errors
@@ -990,7 +1009,7 @@ func rebuildImpl(
 			data:     watchData,
 			resolver: resolver,
 			rebuild: func() fs.WatchData {
-				value := rebuildImpl(buildOpts, caches, plugins, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */)
+				value := rebuildImpl(buildOpts, caches, plugins, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */, &bundle, &scanner)
 				if onRebuild != nil {
 					go onRebuild(value.result)
 				}
@@ -1007,7 +1026,7 @@ func rebuildImpl(
 	var rebuild func() BuildResult
 	if buildOpts.Incremental {
 		rebuild = func() BuildResult {
-			value := rebuildImpl(buildOpts, caches, plugins, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */)
+			value := rebuildImpl(buildOpts, caches, plugins, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */, &bundle, &scanner)
 			if watch != nil {
 				watch.setWatchData(value.watchData)
 			}
@@ -1284,7 +1303,7 @@ func transformImpl(input string, transformOpts TransformOptions) TransformResult
 		// Scan over the bundle
 		mockFS := fs.MockFS(make(map[string]string))
 		resolver := resolver.NewResolver(mockFS, log, caches, options)
-		bundle := bundler.ScanBundle(log, mockFS, resolver, caches, nil, options)
+		_, bundle := bundler.ScanBundle(log, mockFS, resolver, caches, nil, options, nil)
 
 		// Stop now if there were errors
 		if !log.HasErrors() {
@@ -1297,7 +1316,6 @@ func transformImpl(input string, transformOpts TransformOptions) TransformResult
 	var code []byte
 	var sourceMap []byte
 
-	println("LOL@@@")
 	// Unpack the JavaScript file and the source map file
 	if len(results) == 1 {
 		code = results[0].Contents

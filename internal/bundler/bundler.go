@@ -268,6 +268,11 @@ func parseFile(args parseArgs) {
 
 		ast, ok := args.caches.JSCache.Parse(args.log, source, js_parser.OptionsFromConfig(&args.options))
 		result.file.inputFile.Repr = &graph.JSRepr{AST: ast}
+
+		if !ok {
+			println("@@@@@BAD PARSE", source.PrettyPath)
+		}
+
 		result.ok = ok
 
 	case config.LoaderCSS:
@@ -542,6 +547,7 @@ func parseFile(args parseArgs) {
 		}
 	}
 
+	// This is s.resultChannel <- result
 	args.results <- result
 }
 
@@ -749,6 +755,7 @@ func runOnResolvePlugins(
 			if pluginName == "" {
 				pluginName = plugin.Name
 			}
+			// println("@@@@@@@ONRESOLVE " + pluginName)
 			didLogError := logPluginMessages(res, log, pluginName, result.Msgs, result.ThrownError, importSource, importPathRange)
 
 			// Plugins can also provide additional file system paths to watch
@@ -761,6 +768,7 @@ func runOnResolvePlugins(
 
 			// Stop now if there was an error
 			if didLogError {
+				// println("@@@@@@@ONRESOLVE error")
 				return nil, true, resolver.DebugMeta{}
 			}
 
@@ -983,7 +991,7 @@ func hashForFileName(hashBytes []byte) string {
 	return base32.StdEncoding.EncodeToString(hashBytes)[:8]
 }
 
-type scanner struct {
+type Scanner struct {
 	log     logger.Log
 	fs      fs.FS
 	res     resolver.Resolver
@@ -995,6 +1003,7 @@ type scanner struct {
 	// valid. Make sure to check the "ok" flag before using them.
 	results       []parseResult
 	visited       map[logger.Path]uint32
+	invalidated   map[logger.Path]bool
 	resultChannel chan parseResult
 	remaining     int
 }
@@ -1012,7 +1021,8 @@ func ScanBundle(
 	caches *cache.CacheSet,
 	entryPoints []EntryPoint,
 	options config.Options,
-) Bundle {
+	scannerPtr *Scanner,
+) (Scanner, Bundle) {
 	start := time.Now()
 	start2 := time.Now()
 	if log.Debug {
@@ -1021,21 +1031,32 @@ func ScanBundle(
 
 	applyOptionDefaults(&options)
 
-	s := scanner{
-		log:           log,
-		fs:            fs,
-		res:           res,
-		caches:        caches,
-		options:       options,
-		results:       make([]parseResult, 0, caches.SourceIndexCache.LenHint()),
-		visited:       make(map[logger.Path]uint32),
-		resultChannel: make(chan parseResult),
-	}
+	s := func() Scanner {
+		if scannerPtr != nil {
+			return *scannerPtr
+		}
+		
+		s2 := Scanner{
+			log:           log,
+			fs:            fs,
+			res:           res,
+			caches:        caches,
+			options:       options,
+			results:       make([]parseResult, 0, caches.SourceIndexCache.LenHint()),
+			visited:       make(map[logger.Path]uint32),
+			invalidated:   make(map[logger.Path]bool),
+			resultChannel: make(chan parseResult),
+		}	
+		s2.results = make([]parseResult, 0, 2000)
+		return s2
+	}()
+
+	println(fmt.Sprintf("@@@start %d", s.remaining))
+
 	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Created scanner (%dms)", time.Since(start2).Milliseconds()))
 	start2 = time.Now()
-
 	// Always start by parsing the runtime file
-	s.results = append(s.results, parseResult{})
+	// s.results = append(s.results, parseResult{})
 	s.remaining++
 	go func() {
 		source, ast, ok := globalRuntimeCache.parseRuntime(&options)
@@ -1050,16 +1071,49 @@ func ScanBundle(
 		}
 	}()
 
-	s.preprocessInjectedFiles()
-	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("s.preprocessInjectedFiles done (%dms)", time.Since(start2).Milliseconds()))
-	start2 = time.Now()
+	println(fmt.Sprintf("@@@after runtime %d", s.remaining))
 
 	entryPointMeta := s.addEntryPoints(entryPoints)
+	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("s.addEntryPoints done (%dms)", time.Since(start2).Milliseconds()))
+	start2 = time.Now()
+
+	println(fmt.Sprintf("@@@after entrypoints %d", s.remaining))
+
+	if scannerPtr != nil {
+		println("@@RESCAN")
+		resolveResultZ, aaa, bbb := runOnResolvePlugins(
+			s.options.Plugins,
+			s.res,
+			s.log,
+			s.fs,
+			&s.caches.FSCache,
+			nil,
+			logger.Range{},
+			"file",
+			// "/Users/gord/src/github.com/Shopify/web/app/foundation/Frame/Frame.tsx",
+			"/Users/gord/src/github.com/Shopify/web/app/sections/Home/components/CardList/CardList.tsx",
+			ast.ImportStmt,
+			"/Users/gord/src/github.com/Shopify/web",
+			nil,
+		)
+
+		println(fmt.Sprintf("@@RESOLVED %v %v %v", resolveResultZ, aaa, bbb))
+		prettyPathZ := s.res.PrettyPath(resolveResultZ.PathPair.Primary)
+		println("@@PARSE")
+		s.maybeParseFile(*resolveResultZ, prettyPathZ, nil, logger.Range{}, resolveResultZ.PluginData, inputKindNormal, nil)			
+		// s.remaining++
+		println(fmt.Sprintf("@@DONE RESCAN %d", s.remaining))
+	}
+
+	println(fmt.Sprintf("@@@scan all %d", s.remaining))
 	s.scanAllDependencies()
+	println(fmt.Sprintf("@@@scan all done %d", s.remaining))
 	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("s.scanAllDependencies done (%dms)", time.Since(start2).Milliseconds()))
 	start2 = time.Now()
 
+	println("@@@process scanned start")
 	files := s.processScannedFiles()
+	println("@@@process scanned done")
 	log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("s.processScannedFiles done (%dms)", time.Since(start2).Milliseconds()))
 	start2 = time.Now()
 
@@ -1067,12 +1121,15 @@ func ScanBundle(
 		log.AddDebug(nil, logger.Loc{}, fmt.Sprintf("Ended the scan phase (%dms)", time.Since(start).Milliseconds()))
 	}
 
-	return Bundle{
+	b := Bundle{
 		fs:          fs,
 		res:         res,
 		files:       files,
 		entryPoints: entryPointMeta,
 	}
+
+	return s, b
+	// return b
 }
 
 type inputKind uint8
@@ -1083,8 +1140,55 @@ const (
 	inputKindStdin
 )
 
+func (s *Scanner) ClearVisited(clearPath string) {
+	println(fmt.Sprintf("@@before %d", len(s.visited)))
+	for index, visitedPath := range s.visited {
+		// println("@@??" + index.Text)
+		if index.Text == clearPath {
+			sourceIndex := s.visited[index]
+			println(fmt.Sprintf("CLEAR found visited %v %v %d", clearPath, visitedPath, sourceIndex))
+			// delete(s.visited, index)
+			s.invalidated[index] = true
+			s.caches.FSCache.ClearFile(
+				// "/Users/gord/src/github.com/Shopify/web/app/foundation/Frame/Frame.tsx"
+				"/Users/gord/src/github.com/Shopify/web/app/sections/Home/components/CardList/CardList.tsx",
+			);
+			s.caches.FSCache.ClearFile(
+				// "/users/gord/src/github.com/shopify/web/app/foundation/frame/frame.tsx",
+				"/users/gord/src/github.com/shopify/web/app/sections/home/components/cardlist/cardlist.tsx",
+			);
+			s.caches.JSCache.Clear(logger.Source{
+				Index:          sourceIndex,
+				KeyPath:        logger.Path{
+					// Text: "/Users/gord/src/github.com/Shopify/web/app/foundation/Frame/Frame.ts",
+					Text: "/Users/gord/src/github.com/Shopify/web/app/sections/Home/components/CardList/CardList.tsx",
+					Namespace: "file",
+				},
+				// PrettyPath:     "app/foundation/Frame/Frame.tsx",
+				PrettyPath:     "app/sections/Home/components/CardList/CardList.tsx",
+				IdentifierName: "",
+			})
+			s.caches.JSCache.Clear(logger.Source{
+				Index:          sourceIndex,
+				KeyPath:        logger.Path{
+					// Text: "/users/gord/src/github.com/shopify/web/app/foundation/frame/frame.tsx",
+					Text: "/users/gord/src/github.com/shopify/web/app/sections/home/components/cardlist/cardlist.tsx",
+					Namespace: "file",
+				},
+				// PrettyPath:     "app/foundation/Frame/Frame.tsx",
+				PrettyPath:     "app/sections/Home/components/CardList/CardList.tsx",
+				IdentifierName: "",
+			})
+			s.results[sourceIndex] = parseResult{
+				ok: false,
+			}
+		}
+	}
+	println(fmt.Sprintf("@@after %d", len(s.visited)))
+}
+
 // This returns the source index of the resulting file
-func (s *scanner) maybeParseFile(
+func (s *Scanner) maybeParseFile(
 	resolveResult resolver.ResolveResult,
 	prettyPath string,
 	importSource *logger.Source,
@@ -1095,18 +1199,28 @@ func (s *scanner) maybeParseFile(
 ) uint32 {
 	path := resolveResult.PathPair.Primary
 	visitedKey := path
+	// println(fmt.Sprintf("@@maybeParseFile visited text: %v, namespace: %v", visitedKey.Text, visitedKey.Namespace))
 	if visitedKey.Namespace == "file" {
 		visitedKey.Text = lowerCaseAbsPathForWindows(visitedKey.Text)
 	}
 
 	// Only parse a given file path once
 	sourceIndex, ok := s.visited[visitedKey]
-	if ok {
+	invalidated, _ := s.invalidated[visitedKey]
+	if ok && !invalidated {
+		// println("@@mayParseFile reusing " + visitedKey.Text)
 		return sourceIndex
 	}
 
-	sourceIndex = s.allocateSourceIndex(visitedKey, cache.SourceIndexNormal)
-	s.visited[visitedKey] = sourceIndex
+	if !ok {
+		sourceIndex = s.allocateSourceIndex(visitedKey, cache.SourceIndexNormal)
+		s.visited[visitedKey] = sourceIndex
+	} else {
+		println("@@@invalidated", sourceIndex)
+	}
+
+	// println("@@mayParseFile visiting " + visitedKey.Text)	
+	s.invalidated[visitedKey] = false
 	s.remaining++
 	optionsClone := s.options
 	if kind != inputKindStdin {
@@ -1190,7 +1304,7 @@ func (s *scanner) maybeParseFile(
 	return sourceIndex
 }
 
-func (s *scanner) allocateSourceIndex(path logger.Path, kind cache.SourceIndexKind) uint32 {
+func (s *Scanner) allocateSourceIndex(path logger.Path, kind cache.SourceIndexKind) uint32 {
 	// Allocate a source index using the shared source index cache so that
 	// subsequent builds reuse the same source index and therefore use the
 	// cached parse results for increased speed.
@@ -1210,7 +1324,7 @@ func (s *scanner) allocateSourceIndex(path logger.Path, kind cache.SourceIndexKi
 	return sourceIndex
 }
 
-func (s *scanner) preprocessInjectedFiles() {
+func (s *Scanner) preprocessInjectedFiles() {
 	injectedFiles := make([]config.InjectedFile, 0, len(s.options.InjectedDefines)+len(s.options.InjectAbsPaths))
 	duplicateInjectedFiles := make(map[string]bool)
 	injectWaitGroup := sync.WaitGroup{}
@@ -1298,7 +1412,7 @@ func (s *scanner) preprocessInjectedFiles() {
 	s.options.InjectedFiles = injectedFiles
 }
 
-func (s *scanner) addEntryPoints(entryPoints []EntryPoint) []graph.EntryPoint {
+func (s *Scanner) addEntryPoints(entryPoints []EntryPoint) []graph.EntryPoint {
 	// Reserve a slot for each entry point
 	entryMetas := make([]graph.EntryPoint, 0, len(entryPoints)+1)
 
@@ -1548,7 +1662,7 @@ func lowestCommonAncestorDirectory(fs fs.FS, entryPoints []graph.EntryPoint) str
 	return lowestAbsDir
 }
 
-func (s *scanner) scanAllDependencies() {
+func (s *Scanner) scanAllDependencies() {
 	// Continue scanning until all dependencies have been discovered
 	start2 := time.Now();
 	scan := int64(0)
@@ -1559,14 +1673,18 @@ func (s *scanner) scanAllDependencies() {
 
 	scanStart := time.Now()
 	for s.remaining > 0 {
+		// println(fmt.Sprintf("@@remaining %d", s.remaining))
 		scan = scan + time.Since(scanStart).Milliseconds()
 		waitStart := time.Now()
 		result := <-s.resultChannel
 		s.remaining--
 		waitResult = waitResult + time.Since(waitStart).Milliseconds();
 		if !result.ok {
+			println("@@scanAllDependencies - bad result")
 			continue
 		}
+
+		// println(fmt.Sprintf("@@scanAllDependencies - processing result %d %s", result.file.inputFile.Source.Index, result.file.inputFile.Source.PrettyPath))
 
 		// Don't try to resolve paths if we're not bundling
 		if s.options.Mode == config.ModeBundle {
@@ -1626,7 +1744,7 @@ func (s *scanner) scanAllDependencies() {
 	println(fmt.Sprintf("bundler.scanAllDependencies - done %d", time.Since(start2).Milliseconds()))
 }
 
-func (s *scanner) processScannedFiles() []scannerFile {
+func (s *Scanner) processScannedFiles() []scannerFile {
 	// Now that all files have been scanned, process the final file import records
 	for i, result := range s.results {
 		if !result.ok {
@@ -1812,7 +1930,7 @@ func (s *scanner) processScannedFiles() []scannerFile {
 	return files
 }
 
-func (s *scanner) validateTLA(sourceIndex uint32) tlaCheck {
+func (s *Scanner) validateTLA(sourceIndex uint32) tlaCheck {
 	result := &s.results[sourceIndex]
 
 	if result.ok && result.tlaCheck.depth == 0 {

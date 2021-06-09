@@ -243,7 +243,7 @@ publish-freebsd-arm64: platform-freebsd-arm64
 	cd npm/esbuild-freebsd-arm64 && npm publish --access public
 
 publish-openbsd: platform-openbsd
-	test -n "$(OTP)" && cd npm/esbuild-openbsd-64 && npm publish --otp="$(OTP)"
+	cd npm/esbuild-openbsd-64 && npm publish --access public
 
 publish-linux: platform-linux
 	cd npm/esbuild-linux-64 && npm publish --access public
@@ -270,12 +270,7 @@ publish-neutral: platform-neutral
 	cd npm/esbuild && npm publish --access public
 
 publish-deno:
-	test -d deno/.git || (rm -fr deno && git clone git@github.com:esbuild/deno-esbuild.git deno)
-	cd deno && git fetch && git checkout main && git reset --hard origin/main
-	make platform-deno
-	cd deno && git commit -am "publish $(ESBUILD_VERSION) to deno"
-	cd deno && git tag "v$(ESBUILD_VERSION)"
-	cd deno && git push origin main "v$(ESBUILD_VERSION)"
+	echo "deno is not supported."
 
 clean:
 	rm -f esbuild

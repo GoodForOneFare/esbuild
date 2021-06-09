@@ -205,6 +205,7 @@ function flagsForBuildOptions(
   let allowOverwrite = getFlag(options, keys, 'allowOverwrite', mustBeBoolean);
   let incremental = getFlag(options, keys, 'incremental', mustBeBoolean) === true;
   let spinxAssetBaseUrl = getFlag(options, keys, 'spinxAssetBaseUrl', mustBeString);
+  let spinxHotReact = getFlag(options, keys, "spinxHotReact", mustBeBoolean) ?? false;
   keys.plugins = true; // "plugins" has already been read earlier
   checkForInvalidFlags(options, keys, `in ${callName}() call`);
 
@@ -225,6 +226,7 @@ function flagsForBuildOptions(
   if (spinxAssetBaseUrl) flags.push(`--spinx-asset-base-url=${spinxAssetBaseUrl}`);
   if (splitting) flags.push('--splitting');
   if (preserveSymlinks) flags.push('--preserve-symlinks');
+  if (spinxHotReact) flags.push("--spinx-hot-react");
   if (metafile) flags.push(`--metafile`);
   if (outfile) flags.push(`--outfile=${outfile}`);
   if (outdir) flags.push(`--outdir=${outdir}`);

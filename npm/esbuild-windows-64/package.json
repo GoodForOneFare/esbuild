@@ -1,6 +1,6 @@
 {
   "name": "@goodforonefare/esbuild-windows-64",
-  "version": "0.12.8",
+  "version": "0.12.8-json-comments",
   "description": "The Windows 64-bit binary for esbuild, a JavaScript bundler.",
   "repository": "https://github.com/evanw/esbuild",
   "license": "MIT",

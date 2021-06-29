@@ -279,7 +279,10 @@ func parseFile(args parseArgs) {
 		result.ok = true
 
 	case config.LoaderJSON:
-		expr, ok := args.caches.JSONCache.Parse(args.log, source, js_parser.JSONOptions{})
+		expr, ok := args.caches.JSONCache.Parse(args.log, source, js_parser.JSONOptions{
+			AllowComments:       true, // https://github.com/microsoft/TypeScript/issues/4987
+			AllowTrailingCommas: true,
+		})
 		ast := js_parser.LazyExportAST(args.log, source, js_parser.OptionsFromConfig(&args.options), expr, "")
 		if pluginName != "" {
 			result.file.inputFile.SideEffects.Kind = graph.NoSideEffects_PureData_FromPlugin

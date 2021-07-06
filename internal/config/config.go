@@ -271,6 +271,7 @@ type Options struct {
 	Stdin *StdinInfo
 	SpinxAssetBaseURL string
 	SpinxHotReact     bool
+	SpinxAsyncEntrypoints []string
 }
 
 type TSTarget struct {
@@ -382,7 +383,7 @@ func SubstituteTemplate(template []PathTemplate, placeholders PathPlaceholders) 
 }
 
 func IsTreeShakingEnabled(mode Mode, outputFormat Format) bool {
-	return mode == ModeBundle || (mode == ModeConvertFormat && outputFormat == FormatIIFE)
+	return false // mode == ModeBundle || (mode == ModeConvertFormat && outputFormat == FormatIIFE)
 }
 
 func ShouldCallRuntimeRequire(mode Mode, outputFormat Format) bool {
@@ -494,6 +495,7 @@ type OnResolveArgs struct {
 	ResolveDir string
 	Kind       ast.ImportKind
 	PluginData interface{}
+	Extras     []string
 }
 
 type OnResolveResult struct {

@@ -11,8 +11,10 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +27,7 @@ import (
 )
 
 type responseCallback = func(interface{})
-type rebuildCallback = func(uint32) []byte
+type rebuildCallback = func(uint32, []string) []byte
 type watchStopCallback = func()
 type serverStopCallback = func()
 
@@ -197,7 +199,16 @@ func (service *serviceType) handleIncomingPacket(bytes []byte) (result outgoingP
 			}
 
 		case "rebuild":
+
+			// println(fmt.Sprintf("@@@@rebuild! %v", request))
 			rebuildID := request["rebuildID"].(int)
+			// extras := strings.Split(request["asyncEntrypoints"].(string), " ")
+			// println("@@@HALP", fmt.Sprintf("%T", request["asyncEntrypoints"]))
+
+			extras := decodeStringArray(request["asyncEntrypoints"].([]interface{}))
+			// println(fmt"@@@THERE", extrs)
+			// extras := request["asyncEntrypoints"].([]string)
+			// println(fmt.Sprintf("@@rebuild extras %v", extras))
 			rebuild, ok := func() (rebuildCallback, bool) {
 				service.mutex.Lock()
 				defer service.mutex.Unlock()
@@ -215,7 +226,7 @@ func (service *serviceType) handleIncomingPacket(bytes []byte) (result outgoingP
 				}
 			}
 			return outgoingPacket{
-				bytes: rebuild(p.id),
+				bytes: rebuild(p.id, extras),
 			}
 
 		case "watch-stop":
@@ -460,8 +471,9 @@ func (service *serviceType) handleBuildRequest(id uint32, request map[string]int
 			// Only mutate the map while inside a mutex
 			service.mutex.Lock()
 			defer service.mutex.Unlock()
-			service.rebuilds[rebuildID] = func(id uint32) []byte {
-				result := result.Rebuild()
+			service.rebuilds[rebuildID] = func(id uint32, extras []string) []byte {
+				// println(fmt.Sprintf("@@@@@service.rebuild %v", extras))
+				result := result.Rebuild(extras)
 				response := resultToResponse(result)
 				return encodePacket(packet{
 					id:    id,
@@ -648,6 +660,43 @@ func (service *serviceType) convertPlugins(key int, jsPlugins interface{}) ([]ap
 						ids = append(ids, item.id)
 					}
 				}
+
+				if len(args.Extras) > 0 && args.Kind == api.ResolveJSDynamicImport {
+					// println("@@args.Extras", fmt.Sprintf("%v", args.Extras), len([]string{}))
+					isBlessed := func () bool {
+						sectionStart := strings.Index(args.ResolveDir, string(os.PathSeparator) + "app" + string(os.PathSeparator) + "sections" + string(os.PathSeparator))
+						if sectionStart == -1 {
+							return true
+						}
+												
+						basePath := args.ResolveDir[0:sectionStart]
+						relativePath, err := filepath.Rel(basePath, args.ResolveDir)
+						if err != nil {
+							panic("oh no")
+						}
+
+						segments := strings.Split(relativePath, string(os.PathSeparator))
+
+						// println("@@@path", segments[2], contains(args.Extras, segments[2]), fmt.Sprintf("%v", args.Extras))
+
+						return contains(args.Extras, segments[2])
+						// println(fmt.Sprintf("@@@BLESS? %v", args.Extras))
+						// for _, x := range args.Extras {
+						// 	if strings.HasSuffix(args.Path, x) || strings.Contains(args.Path, "app/sections/" + x) {
+						// 		return true
+						// 	}
+						// }
+						// return false;
+					}()
+					if isBlessed {
+						// println("@@blessing", args.Path);					
+					} else {
+						resolvedPath := filepath.Join(args.ResolveDir, args.Path);
+						return api.OnResolveResult{
+							Path: resolvedPath + ".es-async",
+						}, nil					
+				  }
+			  }
 
 				result := api.OnResolveResult{}
 				if len(ids) == 0 {
@@ -1056,4 +1105,14 @@ func decodeMessageToPrivate(obj map[string]interface{}) logger.Msg {
 		})
 	}
 	return msg
+}
+
+func contains(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+
+	return false
 }

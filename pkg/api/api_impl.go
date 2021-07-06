@@ -715,7 +715,9 @@ func buildImpl(buildOpts BuildOptions) internalBuildResult {
 		panic("Mutating \"AbsWorkingDir\" is not allowed")
 	}
 
-	internalResult := rebuildImpl(buildOpts, cache.MakeCacheSet(), plugins, onEndCallbacks, logOptions, log, false /* isRebuild */)
+	// println("@@@@@@@BUILDIMPL", fmt.Sprintf("%v", buildOpts.SpinxAsyncEntrypoints), len(buildOpts.SpinxAsyncEntrypoints))
+	extras := buildOpts.SpinxAsyncEntrypoints
+	internalResult := rebuildImpl(buildOpts, cache.MakeCacheSet(), plugins, onEndCallbacks, logOptions, log, false /* isRebuild */, extras)
 
 	// Print a summary of the generated files to stderr. Except don't do
 	// this if the terminal is already being used for something else.
@@ -782,6 +784,7 @@ func rebuildImpl(
 	logOptions logger.OutputOptions,
 	log logger.Log,
 	isRebuild bool,
+	extras []string,
 ) internalBuildResult {
 	// Convert and validate the buildOpts
 	realFS, err := fs.RealFS(fs.RealFSOptions{
@@ -852,6 +855,7 @@ func rebuildImpl(
 		Plugins:               plugins,
 		SpinxAssetBaseURL:     buildOpts.SpinxAssetBaseUrl,
 		SpinxHotReact:         buildOpts.SpinxHotReact,
+		SpinxAsyncEntrypoints: buildOpts.SpinxAsyncEntrypoints,
 	}
 	if options.MainFields != nil {
 		options.MainFields = append([]string{}, options.MainFields...)
@@ -955,7 +959,7 @@ func rebuildImpl(
 		}
 
 		// Scan over the bundle
-		bundle := bundler.ScanBundle(log, realFS, resolver, caches, entryPoints, options, timer)
+		bundle := bundler.ScanBundle(log, realFS, resolver, caches, entryPoints, options, timer, extras)
 		watchData = realFS.WatchData()
 
 		// Stop now if there were errors
@@ -1039,7 +1043,7 @@ func rebuildImpl(
 			data:     watchData,
 			resolver: resolver,
 			rebuild: func() fs.WatchData {
-				value := rebuildImpl(buildOpts, caches, plugins, onEndCallbacks, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */)
+				value := rebuildImpl(buildOpts, caches, plugins, onEndCallbacks, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */, []string{})
 				if onRebuild != nil {
 					go onRebuild(value.result)
 				}
@@ -1053,10 +1057,11 @@ func rebuildImpl(
 		}
 	}
 
-	var rebuild func() BuildResult
+	var rebuild func(extras2 []string) BuildResult
 	if buildOpts.Incremental {
-		rebuild = func() BuildResult {
-			value := rebuildImpl(buildOpts, caches, plugins, onEndCallbacks, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */)
+		rebuild = func(extras2 []string) BuildResult {
+			// println("@@@@api_impl.rebuild incremental %v", extras2)
+			value := rebuildImpl(buildOpts, caches, plugins, onEndCallbacks, logOptions, logger.NewStderrLog(logOptions), true /* isRebuild */, extras2)
 			if watch != nil {
 				watch.setWatchData(value.watchData)
 			}
@@ -1352,7 +1357,7 @@ func transformImpl(input string, transformOpts TransformOptions) TransformResult
 		// Scan over the bundle
 		mockFS := fs.MockFS(make(map[string]string))
 		resolver := resolver.NewResolver(mockFS, log, caches, options)
-		bundle := bundler.ScanBundle(log, mockFS, resolver, caches, nil, options, timer)
+		bundle := bundler.ScanBundle(log, mockFS, resolver, caches, nil, options, timer, make([]string, 0))
 
 		// Stop now if there were errors
 		if !log.HasErrors() {
@@ -1460,6 +1465,7 @@ func (impl *pluginImpl) OnResolve(options OnResolveOptions, callback func(OnReso
 				ResolveDir: args.ResolveDir,
 				Kind:       kind,
 				PluginData: args.PluginData,
+				Extras:     args.Extras, //[]string{"api_impl OnResolve"},
 			})
 			result.PluginName = response.PluginName
 			result.AbsWatchFiles = impl.validatePathsArray(response.WatchFiles, "watch file")

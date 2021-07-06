@@ -29,7 +29,7 @@ type apiHandler struct {
 	servedir         string
 	options          *config.Options
 	onRequest        func(ServeOnRequestArgs)
-	rebuild          func() BuildResult
+	rebuild          func([]string) BuildResult
 	currentBuild     *runningBuild
 	fs               fs.FS
 }
@@ -50,7 +50,7 @@ func (h *apiHandler) build() BuildResult {
 
 			// Build on another thread
 			go func() {
-				result := h.rebuild()
+				result := h.rebuild([]string{"@@server_other::rebuild"})
 				h.rebuild = result.Rebuild
 				build.result = result
 				build.waitGroup.Done()
@@ -528,7 +528,7 @@ func serveImpl(serveOptions ServeOptions, buildOptions BuildOptions) (ServeResul
 		onRequest:        serveOptions.OnRequest,
 		outdirPathPrefix: outdirPathPrefix,
 		servedir:         serveOptions.Servedir,
-		rebuild: func() BuildResult {
+		rebuild: func(extras2 []string) BuildResult {
 			build := buildImpl(buildOptions)
 			if handler.options == nil {
 				handler.options = &build.options

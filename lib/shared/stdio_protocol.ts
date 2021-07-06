@@ -66,6 +66,7 @@ export interface PingRequest {
 export interface RebuildRequest {
   command: 'rebuild';
   rebuildID: number;
+  asyncEntrypoints: string[];
 }
 
 export interface RebuildDisposeRequest {

@@ -305,8 +305,9 @@ type BuildOptions struct {
 	Plugins        []Plugin
 
 	Watch *WatchMode
-	SpinxAssetBaseUrl string
-	SpinxHotReact     bool
+	SpinxAssetBaseUrl     string
+	SpinxHotReact         bool
+	SpinxAsyncEntrypoints []string
 }
 
 type EntryPoint struct {
@@ -332,7 +333,7 @@ type BuildResult struct {
 	OutputFiles []OutputFile
 	Metafile    string
 
-	Rebuild func() BuildResult // Only when "Incremental: true"
+	Rebuild func(extras []string) BuildResult // Only when "Incremental: true"
 	Stop    func()             // Only when "Watch: true"
 }
 
@@ -466,6 +467,7 @@ type OnResolveArgs struct {
 	ResolveDir string
 	Kind       ResolveKind
 	PluginData interface{}
+	Extras     []string
 }
 
 type OnResolveResult struct {

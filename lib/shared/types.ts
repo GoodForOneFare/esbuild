@@ -69,6 +69,7 @@ export interface BuildOptions extends CommonOptions {
   watch?: boolean | WatchMode;
   spinxAssetBaseUrl: string;
   spinxHotReact: boolean;
+  spinxAsyncEntrypoints?: string[]
 }
 
 export interface WatchMode {

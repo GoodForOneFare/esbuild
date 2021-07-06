@@ -13842,6 +13842,7 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 								},
 								s.Fn.Body.Stmts...,
 							)
+							break;
 						}
 					}
 				}

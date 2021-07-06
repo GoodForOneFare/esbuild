@@ -14,7 +14,9 @@ package graph
 // manually enforced. Please be careful.
 
 import (
+	// "fmt"
 	"sort"
+	// "strings"
 	"sync"
 
 	"github.com/evanw/esbuild/internal/ast"

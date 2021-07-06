@@ -277,6 +277,15 @@ func parseOptionsImpl(
 		case strings.HasPrefix(arg, "--asset-names=") && buildOpts != nil:
 			buildOpts.AssetNames = arg[len("--asset-names="):]
 
+		case strings.HasPrefix(arg, "--spinx-async-entrypoints=") && buildOpts != nil:
+			entrypoints := []string{}
+			for _, entrypoint := range strings.Split(arg[len("--spinx-async-entrypoints="):], ",") {
+				if (entrypoint != "") {
+					entrypoints = append(entrypoints, entrypoint)
+				}
+			}
+			buildOpts.SpinxAsyncEntrypoints = entrypoints
+
 		case strings.HasPrefix(arg, "--define:"):
 			value := arg[len("--define:"):]
 			equals := strings.IndexByte(value, '=')

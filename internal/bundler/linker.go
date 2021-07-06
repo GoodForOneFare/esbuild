@@ -736,6 +736,13 @@ func (c *linkerContext) computeCrossChunkDependencies(chunks []chunkInfo) {
 				// Go over each part in this file that's marked for inclusion in this chunk
 				switch repr := c.graph.Files[sourceIndex].InputFile.Repr.(type) {
 				case *graph.JSRepr:
+					if c.graph.Files[sourceIndex].InputFile.Source.PrettyPath == "<runtime>" {
+						for _, namedExport := range repr.AST.NamedExports {
+							// println("@@runtime named export", key)
+							chunkMeta.exports[namedExport.Ref] = true
+						}
+					}
+
 					for partIndex, partMeta := range repr.AST.Parts {
 						if !partMeta.IsLive {
 							continue

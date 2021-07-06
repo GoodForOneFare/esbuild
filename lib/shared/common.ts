@@ -206,6 +206,7 @@ function flagsForBuildOptions(
   let incremental = getFlag(options, keys, 'incremental', mustBeBoolean) === true;
   let spinxAssetBaseUrl = getFlag(options, keys, 'spinxAssetBaseUrl', mustBeString);
   let spinxHotReact = getFlag(options, keys, "spinxHotReact", mustBeBoolean) ?? false;
+  let spinxAsyncEntrypoints = getFlag(options, keys, "spinxAsyncEntrypoints", mustBeArray);
   keys.plugins = true; // "plugins" has already been read earlier
   checkForInvalidFlags(options, keys, `in ${callName}() call`);
 
@@ -301,6 +302,17 @@ function flagsForBuildOptions(
         entries.push([key + '', value + '']);
       }
     }
+  }
+
+  if (spinxAsyncEntrypoints) {
+    let values: string[] = [];
+    for (let value of spinxAsyncEntrypoints) {
+      value += "";
+      if (value.indexOf(",") >= 0)
+        throw new Error(`Invalid spinxAsyncEntrypoint value: ${value}`);
+      values.push(value);
+    }
+    flags.push(`--spinx-async-entrypoints=${values.join(",")}`);
   }
 
   if (stdin) {
@@ -1098,9 +1110,9 @@ export function createChannel(streamIn: StreamIn): StreamOut {
         if (response!.rebuildID !== void 0) {
           if (!rebuild) {
             let isDisposed = false;
-            (rebuild as any) = () => new Promise<types.BuildResult>((resolve, reject) => {
+            (rebuild as any) = (args: any) => new Promise<types.BuildResult>((resolve, reject) => {
               if (isDisposed || isClosed) throw new Error('Cannot rebuild');
-              sendRequest<protocol.RebuildRequest, protocol.BuildResponse>(refs, { command: 'rebuild', rebuildID: response!.rebuildID! },
+              sendRequest<protocol.RebuildRequest, protocol.BuildResponse>(refs, { command: 'rebuild', rebuildID: response!.rebuildID!, asyncEntrypoints: args.asyncEntrypoints },
                 (error2, response2) => {
                   if (error2) {
                     const message: types.Message = { pluginName: '', text: error2, location: null, notes: [], detail: void 0 };

@@ -248,6 +248,23 @@ func CloneLinkerGraph(
 		}
 	}
 
+	if codeSplitting {
+		// Move each React context creator into its own chunk.
+		// This allows most HMR re-renders to retain contexts from previous
+		// renders, which reduces layout churn.
+		for stableIndex, sourceIndex := range reachableFiles {
+			if otherFile := &files[sourceIndex]; otherFile.entryPointKind == entryPointNone {
+				switch repr := otherFile.InputFile.Repr.(type) {
+				case *JSRepr:
+					if repr.AST.CreatesReactContext {
+						stableEntryPoints = append(stableEntryPoints, int(stableIndex))
+						otherFile.entryPointKind = entryPointDynamicImport
+					}
+				}
+			}
+		}
+	}
+
 	// Make sure to add dynamic entry points in a deterministic order
 	sort.Ints(stableEntryPoints)
 	for _, stableIndex := range stableEntryPoints {

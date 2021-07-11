@@ -13850,12 +13850,20 @@ func Parse(log logger.Log, source logger.Source, options Options) (result js_ast
 		}
 	}
 
+	_, importsReactCreateContext := p.moduleScope.Members["createContext"]
+	// println("@@", source.PrettyPath)
+	// for k, v := range p.moduleScope.Members {
+	//   println("  ", fmt.Sprintf("%s %v", k, v))
+	// }
+	// println("\n")
+
 	// Pop the module scope to apply the "ContainsDirectEval" rules
 	p.popScope()
 
 	parts = append(append(before, parts...), after...)
 	result = p.toAST(parts, hashbang, directive)
 	result.SourceMapComment = p.lexer.SourceMappingURL
+	result.CreatesReactContext = importsReactCreateContext
 	return
 }
 

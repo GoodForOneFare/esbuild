@@ -1761,6 +1761,8 @@ type AST struct {
 	TopLevelSymbolToPartsFromParser map[Ref][]uint32
 
 	SourceMapComment Span
+
+	CreatesReactContext bool
 }
 
 // This is a histogram of character frequencies for minification
